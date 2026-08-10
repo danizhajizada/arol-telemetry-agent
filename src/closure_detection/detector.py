@@ -19,17 +19,34 @@ def detect_closures(long_df: pd.DataFrame) -> pd.DataFrame:
     closure event, per head_id."""
     df = long_df.sort_values(["head_id", "timestamp"]).copy()
     df["count_prev"] = df.groupby("head_id")["count"].shift(1)
+
+    df["count_increment"] = df["count"] - df["count_prev"]
+
     df["is_closure"] = (
-    (df["count"] != df["count_prev"])
-    & (df["count"] > 0)
-    & (df["count_prev"] > 0)
+        (df["count_increment"] > 0)
+        & (df["count"] > 0)
+        & (df["count_prev"] > 0)
+    )
+    df["time_since_prev_seconds"] = (
+    df.groupby("head_id")["timestamp"]
+    .diff()
+    .dt.total_seconds()
 )
     df.loc[df["count_prev"].isna(), "is_closure"] = False
 
+
     closures = df[df["is_closure"]].copy()
     return closures[
-        ["timestamp", "head_id", "count", "app_torque", "status"]
-    ].reset_index(drop=True)
+    [
+        "timestamp",
+        "head_id",
+        "count",
+        "count_increment",
+        "time_since_prev_seconds",
+        "app_torque",
+        "status",
+    ]
+].reset_index(drop=True)
 
 
 def classify_status(closures: pd.DataFrame, status_codes: dict) -> pd.DataFrame:

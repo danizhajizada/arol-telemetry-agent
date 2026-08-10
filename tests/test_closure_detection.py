@@ -99,3 +99,23 @@ def test_idle_detection_respects_gap_tolerance():
     )
 
     assert idle_periods.empty
+
+def test_detect_closures_preserves_counter_increment():
+    df = pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-01-01 00:00:00",
+            "2026-01-01 00:00:01",
+            "2026-01-01 00:00:02",
+        ]),
+        "head_id": ["H01"] * 3,
+        "count": [100, 100, 103],
+        "app_torque": [2.0, 2.0, 2.1],
+        "status": [0, 0, 0],
+    })
+
+    closures = detect_closures(df)
+
+    assert len(closures) == 1
+    assert closures.iloc[0]["count"] == 103
+    assert closures.iloc[0]["count_increment"] == 3
+    assert closures.iloc[0]["time_since_prev_seconds"] == 1
