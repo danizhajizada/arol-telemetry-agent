@@ -45,14 +45,27 @@ def classify_status(closures: pd.DataFrame, status_codes: dict) -> pd.DataFrame:
 
 
 def detect_idle_periods(
-    long_df: pd.DataFrame, idle_status_code: int, sustained_seconds: int
+    long_df: pd.DataFrame,
+    idle_status_code: int,
+    sustained_seconds: int,
+    max_gap_seconds: int = 2,
 ) -> pd.DataFrame:
     """Identify sustained idle windows per head, based on the configured
     'No Load' status persisting for at least sustained_seconds."""
     df = long_df.sort_values(["head_id", "timestamp"]).copy()
     df["is_idle_status"] = df["status"] == idle_status_code
+
+    df["time_gap"] = (
+        df.groupby("head_id")["timestamp"].diff()
+        > pd.Timedelta(seconds=max_gap_seconds)
+    )
+
     df["run_id"] = (
-        df["is_idle_status"] != df.groupby("head_id")["is_idle_status"].shift(1)
+        (
+            df["is_idle_status"]
+            != df.groupby("head_id")["is_idle_status"].shift(1)
+        )
+        | df["time_gap"]
     ).cumsum()
 
     idle_runs = (

@@ -58,3 +58,44 @@ def test_detect_closures_ignores_zero_counter_dropouts():
 
     assert len(closures) == 1
     assert closures.iloc[0]["count"] == 101
+
+def test_idle_detection_breaks_on_timestamp_gap():
+    df = pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-01-01 00:00:00",
+            "2026-01-01 00:00:01",
+            "2026-01-01 00:10:00",
+            "2026-01-01 00:10:01",
+        ]),
+        "head_id": ["H01"] * 4,
+        "status": [2, 2, 2, 2],
+    })
+
+    idle_periods = detect_idle_periods(
+        df,
+        idle_status_code=2,
+        sustained_seconds=300,
+    )
+
+    assert idle_periods.empty
+
+def test_idle_detection_respects_gap_tolerance():
+    df = pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-01-01 00:00:00",
+            "2026-01-01 00:00:02",  # tolerated
+            "2026-01-01 00:10:00",  # too large -> break
+            "2026-01-01 00:10:02",
+        ]),
+        "head_id": ["H01"] * 4,
+        "status": [2, 2, 2, 2],
+    })
+
+    idle_periods = detect_idle_periods(
+        df,
+        idle_status_code=2,
+        sustained_seconds=300,
+        max_gap_seconds=2,
+    )
+
+    assert idle_periods.empty
