@@ -19,7 +19,11 @@ def detect_closures(long_df: pd.DataFrame) -> pd.DataFrame:
     closure event, per head_id."""
     df = long_df.sort_values(["head_id", "timestamp"]).copy()
     df["count_prev"] = df.groupby("head_id")["count"].shift(1)
-    df["is_closure"] = df["count"] != df["count_prev"]
+    df["is_closure"] = (
+    (df["count"] != df["count_prev"])
+    & (df["count"] > 0)
+    & (df["count_prev"] > 0)
+)
     df.loc[df["count_prev"].isna(), "is_closure"] = False
 
     closures = df[df["is_closure"]].copy()

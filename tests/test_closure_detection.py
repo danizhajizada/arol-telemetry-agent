@@ -27,7 +27,7 @@ def test_classify_status_maps_reject_flag():
     status_codes = {0: {"label": "Closure OK", "reject": False}}
     classified = classify_status(closures, status_codes)
     assert classified.iloc[0]["status_label"] == "Closure OK"
-    assert classified.iloc[0]["is_reject"] is False
+    assert not classified.iloc[0]["is_reject"]
 
 
 def test_detect_idle_periods_requires_sustained_duration():
@@ -38,3 +38,23 @@ def test_detect_idle_periods_requires_sustained_duration():
 
     idle_short_threshold = detect_idle_periods(df, idle_status_code=2, sustained_seconds=2)
     assert len(idle_short_threshold) == 1
+
+def test_detect_closures_ignores_zero_counter_dropouts():
+    df = pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-01-01T00:00:00",
+            "2026-01-01T00:00:01",
+            "2026-01-01T00:00:02",
+            "2026-01-01T00:00:03",
+            "2026-01-01T00:00:04",
+        ]),
+        "head_id": ["H01"] * 5,
+        "count": [100, 100, 0, 100, 101],
+        "app_torque": [2.5, 2.5, 0.0, 2.5, 2.6],
+        "status": [0, 0, 0, 0, 0],
+    })
+
+    closures = detect_closures(df)
+
+    assert len(closures) == 1
+    assert closures.iloc[0]["count"] == 101
