@@ -1,0 +1,51 @@
+# Configuration for the AROL telemetry agent.
+# Nothing in src/ should hard-code paths, thresholds, or model names -
+# everything reads from here.
+#
+# NOTE: the provided dataset covers a single machine. machine_id is still
+# carried through the pipeline for provenance/extensibility, but grouping
+# and analytics operate at the head level only (see team_rules.md).
+
+data_pool:
+  folder: "data/"
+  file_pattern: "telemetry_*.csv"
+
+database:
+  path: "data/.cache/telemetry.db"
+  manifest_path: "data/.cache/manifest.json"
+
+schema:
+  timestamp_column: "timestamp"
+  count_suffix: " Count"
+  torque_suffix: " AppTorque"
+  status_suffix: " Status"
+
+status_codes:
+  0:  {label: "Closure OK",      reject: false}
+  2:  {label: "No Load",         reject: false}
+  3:  {label: "Slow Torque",     reject: true}
+  4:  {label: "No Closure",      reject: false}
+  5:  {label: "No Closure (reject)", reject: true}
+  8:  {label: "No InTorque",     reject: false}
+  9:  {label: "No InTorque (reject)", reject: true}
+  16: {label: "No CapTurns",     reject: false}
+  17: {label: "No CapTurns (reject)", reject: true}
+  32: {label: "Following Error", reject: false}
+  33: {label: "Following Error (reject)", reject: true}
+  64: {label: "Bad Closure",     reject: false}
+  65: {label: "Bad Closure (reject)", reject: true}
+
+idle_detection:
+  idle_status_code: 2
+  sustained_seconds: 300
+
+analytics:
+  moving_average_window: 60
+  anomaly_zscore_threshold: 3.0
+  drift_threshold_pct: 0.10
+
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-5"
+  max_tokens: 1024
+  max_tool_call_rounds: 5
