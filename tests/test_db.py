@@ -21,9 +21,6 @@ def test_raw_telemetry_incremental_sync(tmp_path):
         },
     }
 
-    # ---------------------------------------------------------
-    # 1. FIRST RUN: A + B
-    # ---------------------------------------------------------
 
     file_a = data_dir / "telemetry_A.csv"
     file_b = data_dir / "telemetry_B.csv"
@@ -61,9 +58,6 @@ def test_raw_telemetry_incremental_sync(tmp_path):
 
     assert len(stored) == 4
 
-    # ---------------------------------------------------------
-    # 2. NOTHING CHANGED
-    # ---------------------------------------------------------
 
     assert not db.needs_reprocessing(config)
 
@@ -77,10 +71,7 @@ def test_raw_telemetry_incremental_sync(tmp_path):
 
     assert len(stored) == 4
 
-    # ---------------------------------------------------------
-    # 3. ADD NEW FILE C
-    # ---------------------------------------------------------
-
+    # Adding a new file testing
     file_c = data_dir / "telemetry_C.csv"
     file_c.write_text("dummy C")
 
@@ -117,11 +108,7 @@ def test_raw_telemetry_incremental_sync(tmp_path):
     # A=2, B=2, C=2
     assert len(stored) == 6
 
-    # ---------------------------------------------------------
-    # 4. MODIFY EXISTING FILE B
-    # ---------------------------------------------------------
-
-    # Change file size/signature.
+   
     file_b.write_text("dummy B changed content")
 
     assert db.needs_reprocessing(config)
@@ -160,6 +147,5 @@ def test_raw_telemetry_incremental_sync(tmp_path):
 
     assert len(stored_b) == 2
     assert set(stored_b["value"]) == {200, 201}
-
-    # Manifest now matches the current file pool.
+    
     assert not db.needs_reprocessing(config)
