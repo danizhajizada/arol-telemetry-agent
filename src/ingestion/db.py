@@ -53,12 +53,23 @@ def needs_reprocessing(config: dict) -> bool:
         return True
 
     manifest = _load_manifest(manifest_path)
-    files = list(folder.glob(pattern))
-    if not files:
-        logger.warning("No raw files found in %s matching %s", folder, pattern)
-        return False
 
-    return any(manifest.get(f.name) != _file_signature(f) for f in files)
+    files = list(folder.glob(pattern))
+
+    if not files:
+        logger.warning(
+        "No raw files found in %s matching %s",
+        folder,
+        pattern,
+    )
+        return bool(manifest)
+
+    current = {
+        f.name: _file_signature(f)
+        for f in files
+    }
+
+    return current != manifest
 
 
 def update_manifest(config: dict) -> None:
@@ -74,10 +85,69 @@ def update_manifest(config: dict) -> None:
 # --- table read/write helpers ----------------------------------------------
 
 def save_raw_telemetry(raw_df: pd.DataFrame, config: dict) -> None:
-    """Append newly ingested raw wide-format rows - incremental sync,
-    never overwrites previously ingested files."""
+    """
+    Changed files replace their previously stored rows.
+    """
+    folder = Path(config["data_pool"]["folder"])
+    pattern = config["data_pool"]["file_pattern"]
+    manifest_path = Path(config["database"]["manifest_path"])
+
+    db_path = Path(config["database"]["path"])
+    db_exists = db_path.exists()
+
+    current_files = {
+        f.name: _file_signature(f)
+        for f in folder.glob(pattern)
+    }
+
+    old_manifest = _load_manifest(manifest_path)
+
+
     conn = get_connection(config)
-    raw_df.to_sql("raw_telemetry", conn, if_exists="append", index=False)
+
+    if not old_manifest or not db_exists:
+        raw_df.to_sql(
+            "raw_telemetry",
+            conn,
+            if_exists="replace",
+            index=False,
+        )
+        conn.close()
+        return
+
+    changed_files = {
+        name
+        for name, signature in current_files.items()
+        if old_manifest.get(name) != signature
+    }
+
+    removed_files = (
+        set(old_manifest)
+        - set(current_files)
+    )
+
+    for source_file in changed_files | removed_files:
+        conn.execute(
+            """
+            DELETE FROM raw_telemetry
+            WHERE source_file = ?
+            """,
+            (source_file,),
+        )
+
+    if changed_files:
+        changed_rows = raw_df[
+            raw_df["source_file"].isin(changed_files)
+        ]
+
+        changed_rows.to_sql(
+            "raw_telemetry",
+            conn,
+            if_exists="append",
+            index=False,
+        )
+
+    conn.commit()
     conn.close()
 
 
