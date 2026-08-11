@@ -142,13 +142,13 @@ def test_prepare_closures_end_to_end_and_uses_cache(tmp_path, monkeypatch):
 
     def fail_if_loader_runs(*args, **kwargs):
         raise AssertionError(
-            "load_all() was called even though the data pool "
-            "has not changed."
-        )
-
+        "load_raw_file() was called even though the data pool "
+        "has not changed."
+    )
+    
     monkeypatch.setattr(
         cli,
-        "load_all",
+        "load_raw_file",
         fail_if_loader_runs,
     )
 
@@ -175,3 +175,99 @@ def test_prepare_closures_end_to_end_and_uses_cache(tmp_path, monkeypatch):
 
     assert raw_count_after == 5
     assert closures_count_after == 2
+
+def test_pipeline_preserves_counter_change_across_files(
+    tmp_path,
+):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    config = {
+        "data_pool": {
+            "folder": str(data_dir),
+            "file_pattern": "telemetry_*.csv",
+        },
+        "database": {
+            "path": str(
+                tmp_path / "telemetry.db"
+            ),
+            "manifest_path": str(
+                tmp_path / "manifest.json"
+            ),
+        },
+        "schema": {
+            "timestamp_column": "timestamp",
+            "count_suffix": " Count",
+            "torque_suffix": " AppTorque",
+            "status_suffix": " Status",
+        },
+        "status_codes": {
+            0: {
+                "label": "Closure OK",
+                "reject": False,
+            },
+            2: {
+                "label": "No Load",
+                "reject": False,
+            },
+        },
+    }
+
+    # FILE A ends at count 100.
+    pd.DataFrame({
+        "timestamp": [
+            "2026-01-01 23:59:58",
+            "2026-01-01 23:59:59",
+        ],
+        "H01 Count": [
+            100,
+            100,
+        ],
+        "H01 AppTorque": [
+            0.0,
+            0.0,
+        ],
+        "H01 Status": [
+            2,
+            2,
+        ],
+    }).to_csv(
+        data_dir / "telemetry_M1_01.csv",
+        index=False,
+    )
+
+    # FILE B starts at count 101.
+    pd.DataFrame({
+        "timestamp": [
+            "2026-01-02 00:00:00",
+            "2026-01-02 00:00:01",
+        ],
+        "H01 Count": [
+            101,
+            101,
+        ],
+        "H01 AppTorque": [
+            2.0,
+            2.0,
+        ],
+        "H01 Status": [
+            0,
+            0,
+        ],
+    }).to_csv(
+        data_dir / "telemetry_M1_02.csv",
+        index=False,
+    )
+
+    closures = cli._prepare_closures(
+        config
+    )
+
+    assert len(closures) == 1
+
+    event = closures.iloc[0]
+
+    assert event["count"] == 101
+    assert event["count_increment"] == 1
+    assert event["time_since_prev_seconds"] == 1
+    assert event["status_label"] == "Closure OK"

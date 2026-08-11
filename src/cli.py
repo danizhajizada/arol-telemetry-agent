@@ -11,7 +11,10 @@ import logging
 import typer
 import yaml
 
-from src.ingestion.loader import load_all
+from pathlib import Path
+import pandas as pd
+
+from src.ingestion.loader import list_data_files, load_raw_file
 from src.ingestion.normalizer import reshape_wide_to_long, validate, drop_duplicates
 from src.ingestion import db
 from src.closure_detection.detector import detect_closures, classify_status
@@ -34,36 +37,176 @@ def _load_config(config_path: str) -> dict:
 
 
 def _prepare_closures(config: dict):
-    """Runs the full ingestion -> normalization -> closure detection
-    pipeline once, or loads the cached result if the raw data pool hasn't
-    changed since the last run (see ingestion/db.py for the freshness
-    check). This is the "load once, hold in memory" step - every question
-    asked afterwards reuses the returned dataframe."""
+    """Prepare closure data using file-by-file processing.
+    Processing one source file at a time avoids constructing the complete
+    long-format telemetry dataset in memory.
+    """
+    # Use cache when nothing is changed
     if not db.needs_reprocessing(config):
         cached = db.load_closures(config)
+
         if not cached.empty:
-            logger.info("Using cached closures table (no new/changed raw files).")
+            logger.info(
+                "Using cached closures table "
+                "(no new/changed raw files)."
+            )
             return cached
 
-    logger.info("Raw data pool changed or no cache found - running full pipeline.")
-    raw = load_all(config)
-    if raw.empty:
-        typer.echo("No data found - check config data_pool.folder.")
+    logger.info(
+        "Raw data pool changed or no cache found - "
+        "running file-by-file pipeline."
+    )
+
+    files = list_data_files(config)
+
+    if not files:
+        typer.echo(
+            "No data found - check config data_pool.folder."
+        )
         raise typer.Exit(code=1)
-    db.save_raw_telemetry(raw, config)
 
-    long_df = reshape_wide_to_long(raw, config)
-    for issue in validate(long_df):
-        logger.warning("Validation issue: %s", issue)
-    long_df = drop_duplicates(long_df)
-    db.save_readings(long_df, config)
+    
+    # Changed files
+    db_path = Path(config["database"]["path"])
+    manifest_path = Path(
+        config["database"]["manifest_path"]
+    )
 
-    closures = detect_closures(long_df)
-    closures = classify_status(closures, config["status_codes"])
-    db.save_closures(closures, config)
+    full_raw_rebuild = (
+        not db_path.exists()
+        or not manifest_path.exists()
+    )
+
+    changed_files, removed_files = db.get_file_changes(
+        config
+    )
+
+    # If the database/manifest does not yet exist,
+    # every current file needs to be stored.
+    if full_raw_rebuild:
+        changed_files = {
+            path.name
+            for path in files
+        }
+
+    # Remove raw rows belonging to files that disappeared.
+    db.delete_raw_sources(
+        removed_files,
+        config,
+    )
+
+    previous_tail = None
+    first_batch = True
+    first_raw_write = True
+
+    for path in files:
+        logger.info(
+            "Processing %s",
+            path.name,
+        )
+
+       
+        raw = load_raw_file(
+            path,
+            config,
+        )
+
+        # Raw table only changes for new/modified files.
+        if path.name in changed_files:
+            db.save_raw_file(
+                raw,
+                config,
+                replace_table=(
+                    full_raw_rebuild
+                    and first_raw_write
+                ),
+            )
+
+            first_raw_write = False
+
+        long_df = reshape_wide_to_long(
+            raw,
+            config,
+        )
+
+        for issue in validate(long_df):
+            logger.warning(
+                "Validation issue in %s: %s",
+                path.name,
+                issue,
+            )
+
+        long_df = drop_duplicates(long_df)
+
+        mode = (
+            "replace"
+            if first_batch
+            else "append"
+        )
+
+        db.save_readings(
+            long_df,
+            config,
+            mode=mode,
+        )
+
+        if previous_tail is not None:
+            detection_df = pd.concat(
+                [
+                    previous_tail,
+                    long_df,
+                ],
+                ignore_index=True,
+            )
+        else:
+            detection_df = long_df
+
+
+        closures = detect_closures(
+            detection_df
+        )
+
+        closures = classify_status(
+            closures,
+            config["status_codes"],
+        )
+
+        db.save_closures(
+            closures,
+            config,
+            mode=mode,
+        )
+
+        # Preserve only 36 rows:
+        # the final reading for each head.
+        previous_tail = (
+            long_df
+            .sort_values(
+                [
+                    "head_id",
+                    "timestamp",
+                ]
+            )
+            .groupby(
+                "head_id",
+                sort=False,
+            )
+            .tail(1)
+            .copy()
+        )
+
+        first_batch = False
+
+        # Allow this file's large dataframes to be
+        # reclaimed before processing the next file.
+        del raw
+        del long_df
+        del detection_df
+        del closures
 
     db.update_manifest(config)
-    return closures
+
+    return db.load_closures(config)
 
 
 @app.command()

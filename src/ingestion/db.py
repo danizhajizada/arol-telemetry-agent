@@ -82,6 +82,119 @@ def update_manifest(config: dict) -> None:
     manifest_path.write_text(json.dumps(manifest, indent=2))
 
 
+def get_file_changes(config: dict) -> tuple[set[str], set[str]]:
+    """Return source files that are new/changed and files that were removed."""
+
+    folder = Path(config["data_pool"]["folder"])
+    pattern = config["data_pool"]["file_pattern"]
+    manifest_path = Path(config["database"]["manifest_path"])
+
+    current = {
+        f.name: _file_signature(f)
+        for f in folder.glob(pattern)
+    }
+
+    manifest = _load_manifest(manifest_path)
+
+    changed_files = {
+        name
+        for name, signature in current.items()
+        if manifest.get(name) != signature
+    }
+
+    removed_files = set(manifest) - set(current)
+
+    return changed_files, removed_files
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    result = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = ?
+        """,
+        (table_name,),
+    ).fetchone()
+
+    return result is not None
+
+def save_raw_file(
+    raw_df: pd.DataFrame,
+    config: dict,
+    replace_table: bool = False,
+) -> None:
+    """Store one source CSV in raw_telemetry.
+
+    Existing rows for the same source_file are replaced.
+    """
+
+    if raw_df.empty:
+        return
+
+    source_files = raw_df["source_file"].dropna().unique()
+
+    if len(source_files) != 1:
+        raise ValueError(
+            "save_raw_file() expects rows from exactly one source file."
+        )
+
+    source_file = source_files[0]
+
+    conn = get_connection(config)
+
+    if replace_table:
+        raw_df.to_sql(
+            "raw_telemetry",
+            conn,
+            if_exists="replace",
+            index=False,
+        )
+
+    else:
+        if _table_exists(conn, "raw_telemetry"):
+            conn.execute(
+                """
+                DELETE FROM raw_telemetry
+                WHERE source_file = ?
+                """,
+                (source_file,),
+            )
+
+        raw_df.to_sql(
+            "raw_telemetry",
+            conn,
+            if_exists="append",
+            index=False,
+        )
+
+    conn.commit()
+    conn.close()
+
+def delete_raw_sources(
+    source_files: set[str],
+    config: dict,
+) -> None:
+    """Remove raw rows whose source CSV no longer exists."""
+
+    if not source_files:
+        return
+
+    conn = get_connection(config)
+
+    if _table_exists(conn, "raw_telemetry"):
+        conn.executemany(
+            """
+            DELETE FROM raw_telemetry
+            WHERE source_file = ?
+            """,
+            [(name,) for name in source_files],
+        )
+
+        conn.commit()
+
+    conn.close()
+
 # --- table read/write helpers ----------------------------------------------
 
 def save_raw_telemetry(raw_df: pd.DataFrame, config: dict) -> None:
@@ -151,10 +264,16 @@ def save_raw_telemetry(raw_df: pd.DataFrame, config: dict) -> None:
     conn.close()
 
 
-def save_readings(readings_df: pd.DataFrame, config: dict) -> None:
-    """Derived table - always fully recomputed from raw_telemetry."""
+def save_readings(readings_df: pd.DataFrame, config: dict, mode: str = "replace", ) -> None:
     conn = get_connection(config)
-    readings_df.to_sql("readings", conn, if_exists="replace", index=False)
+
+    readings_df.to_sql(
+        "readings",
+        conn,
+        if_exists=mode,
+        index=False,
+    )
+
     conn.close()
 
 
@@ -168,10 +287,16 @@ def load_readings(config: dict) -> pd.DataFrame:
     return df
 
 
-def save_closures(closures_df: pd.DataFrame, config: dict) -> None:
-    """Derived table - always fully recomputed."""
+def save_closures(closures_df: pd.DataFrame, config: dict, mode: str = "replace", ) -> None:
     conn = get_connection(config)
-    closures_df.to_sql("closures", conn, if_exists="replace", index=False)
+
+    closures_df.to_sql(
+        "closures",
+        conn,
+        if_exists=mode,
+        index=False,
+    )
+
     conn.close()
 
 
