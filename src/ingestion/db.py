@@ -264,8 +264,40 @@ def save_raw_telemetry(raw_df: pd.DataFrame, config: dict) -> None:
     conn.close()
 
 
-def save_readings(readings_df: pd.DataFrame, config: dict, mode: str = "replace", ) -> None:
-    """Store compact normalized readings."""
+def save_readings(readings_df, config, mode="replace"):
+    """Store normalized readings as one compressed Parquet file per source CSV."""
+
+    readings_dir = (
+    Path(config["database"]["path"]).parent
+    / "readings"
+    )
+
+    # A full derived-data rebuild starts with a clean readings directory.
+    if mode == "replace" and readings_dir.exists():
+        for path in readings_dir.glob("*.parquet"):
+            path.unlink()
+
+    readings_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    if readings_df.empty:
+        return
+
+    source_files = readings_df["source_file"].dropna().unique()
+
+    if len(source_files) != 1:
+        raise ValueError(
+            "save_readings expects readings from exactly one source file"
+        )
+
+    source_file = str(source_files[0])
+
+    output_path = (
+        readings_dir
+        / f"{Path(source_file).stem}.parquet"
+    )
 
     compact = readings_df[
         [
@@ -280,26 +312,39 @@ def save_readings(readings_df: pd.DataFrame, config: dict, mode: str = "replace"
     compact["count"] = compact["count"].astype("int64")
     compact["status"] = compact["status"].astype("int64")
 
-    conn = get_connection(config)
-
-    compact.to_sql(
-        "readings",
-        conn,
-        if_exists=mode,
+    compact.to_parquet(
+        output_path,
+        engine="pyarrow",
+        compression="zstd",
         index=False,
     )
 
-    conn.close()
 
+def load_readings(config):
+    """Load all normalized Parquet reading files."""
 
-def load_readings(config: dict) -> pd.DataFrame:
-    conn = get_connection(config)
-    try:
-        df = pd.read_sql("SELECT * FROM readings", conn, parse_dates=["timestamp"])
-    except pd.errors.DatabaseError:
-        df = pd.DataFrame()
-    conn.close()
-    return df
+    readings_dir = (
+        Path(config["database"]["path"]).parent
+        / "readings"
+    )
+
+    files = sorted(
+        readings_dir.glob("*.parquet")
+    )
+
+    if not files:
+        return pd.DataFrame()
+
+    return pd.concat(
+        [
+            pd.read_parquet(
+                path,
+                engine="pyarrow",
+            )
+            for path in files
+        ],
+        ignore_index=True,
+    )
 
 
 def save_closures(closures_df: pd.DataFrame, config: dict, mode: str = "replace", ) -> None:

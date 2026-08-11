@@ -1,6 +1,7 @@
 import pandas as pd
 
 import src.cli as cli
+from pathlib import Path
 from src.ingestion import db
 
 
@@ -113,10 +114,8 @@ def test_prepare_closures_end_to_end_and_uses_cache(tmp_path, monkeypatch):
         conn,
     ).iloc[0]["n"]
 
-    readings_count = pd.read_sql(
-        "SELECT COUNT(*) AS n FROM readings",
-        conn,
-    ).iloc[0]["n"]
+    readings = db.load_readings(config)
+    readings_count = len(readings)
 
     closures_count = pd.read_sql(
         "SELECT COUNT(*) AS n FROM closures",
@@ -124,6 +123,17 @@ def test_prepare_closures_end_to_end_and_uses_cache(tmp_path, monkeypatch):
     ).iloc[0]["n"]
 
     conn.close()
+
+    readings_dir = (
+    Path(config["database"]["path"]).parent
+    / "readings"
+)
+
+    parquet_files = list(
+    readings_dir.glob("*.parquet")
+)
+
+    assert len(parquet_files) == 1
 
     # 5 original telemetry timestamps
     assert raw_count == 5
