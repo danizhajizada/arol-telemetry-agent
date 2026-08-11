@@ -265,9 +265,24 @@ def save_raw_telemetry(raw_df: pd.DataFrame, config: dict) -> None:
 
 
 def save_readings(readings_df: pd.DataFrame, config: dict, mode: str = "replace", ) -> None:
+    """Store compact normalized readings."""
+
+    compact = readings_df[
+        [
+            "timestamp",
+            "head_id",
+            "count",
+            "app_torque",
+            "status",
+        ]
+    ].copy()
+
+    compact["count"] = compact["count"].astype("int64")
+    compact["status"] = compact["status"].astype("int64")
+
     conn = get_connection(config)
 
-    readings_df.to_sql(
+    compact.to_sql(
         "readings",
         conn,
         if_exists=mode,
