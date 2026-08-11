@@ -273,9 +273,12 @@ def test_pipeline_preserves_counter_change_across_files(
         config
     )
 
-    assert len(closures) == 1
+    assert closures.height == 1
 
-    event = closures.iloc[0]
+    event = closures.row(
+        0,
+        named=True,
+    )
 
     assert event["count"] == 101
     assert event["count_increment"] == 1

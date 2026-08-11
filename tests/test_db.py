@@ -1,4 +1,5 @@
 import pandas as pd
+import polars as pl
 
 from src.ingestion import db
 
@@ -28,13 +29,13 @@ def test_raw_telemetry_incremental_sync(tmp_path):
     file_a.write_text("dummy A")
     file_b.write_text("dummy B")
 
-    raw = pd.DataFrame({
-        "timestamp": pd.to_datetime([
+    raw = pl.DataFrame({
+        "timestamp": [
             "2026-01-01 00:00:00",
             "2026-01-01 00:00:01",
             "2026-01-01 00:00:02",
             "2026-01-01 00:00:03",
-        ]),
+        ],
         "value": [10, 11, 20, 21],
         "source_file": [
             "telemetry_A.csv",
@@ -42,7 +43,9 @@ def test_raw_telemetry_incremental_sync(tmp_path):
             "telemetry_B.csv",
             "telemetry_B.csv",
         ],
-    })
+    }).with_columns(
+        pl.col("timestamp").str.to_datetime()
+    )
 
     assert db.needs_reprocessing(config)
 
@@ -77,22 +80,29 @@ def test_raw_telemetry_incremental_sync(tmp_path):
 
     assert db.needs_reprocessing(config)
 
-    raw_with_c = pd.concat(
+    new_rows = (
+        pl.DataFrame({
+            "timestamp": [
+                "2026-01-01 00:00:04",
+                "2026-01-01 00:00:05",
+            ],
+            "value": [30, 31],
+            "source_file": [
+                "telemetry_C.csv",
+                "telemetry_C.csv",
+            ],
+        })
+        .with_columns(
+            pl.col("timestamp").str.to_datetime()
+        )
+    )
+
+    raw_with_c = pl.concat(
         [
             raw,
-            pd.DataFrame({
-                "timestamp": pd.to_datetime([
-                    "2026-01-01 00:00:04",
-                    "2026-01-01 00:00:05",
-                ]),
-                "value": [30, 31],
-                "source_file": [
-                    "telemetry_C.csv",
-                    "telemetry_C.csv",
-                ],
-            }),
+            new_rows,
         ],
-        ignore_index=True,
+        how="vertical",
     )
 
     db.save_raw_telemetry(raw_with_c, config)
@@ -113,13 +123,19 @@ def test_raw_telemetry_incremental_sync(tmp_path):
 
     assert db.needs_reprocessing(config)
 
-    raw_changed_b = raw_with_c.copy()
-
-    # Simulate the changed contents of B.
-    raw_changed_b.loc[
-        raw_changed_b["source_file"] == "telemetry_B.csv",
-        "value",
-    ] = [200, 201]
+    raw_changed_b = (
+    raw
+    .filter(
+        pl.col("source_file")
+        == "telemetry_B.csv"
+    )
+    .with_columns(
+        pl.Series(
+            "value",
+            [200, 201],
+        )
+    )
+)
 
     db.save_raw_telemetry(raw_changed_b, config)
     db.update_manifest(config)
