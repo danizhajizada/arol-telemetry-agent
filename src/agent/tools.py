@@ -80,6 +80,41 @@ TOOL_SCHEMAS = [
         },
     },
     {
+        "name": "success_rate_over_time",
+        "description": (
+            "Returns success rate broken down by time period (daily by "
+            "default). Use for questions about how success rate evolved over "
+            "time, daily/hourly breakdowns, or abnormal time intervals."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "freq": {
+                    "type": "string",
+                    "description": "pandas offset alias for the time bucket, e.g. 'D' for daily, 'h' for hourly (default 'D')",
+                }
+            },
+        },
+    },
+    {
+        "name": "torque_distribution",
+        "description": (
+            "Returns a histogram (bin edges + counts) of applied torque "
+            "values. Use for questions asking to show or describe the torque "
+            "distribution."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bins": {"type": "integer", "description": "number of histogram bins, default 10"},
+                "successful_only": {
+                    "type": "boolean",
+                    "description": "restrict to successful closures only (default true)",
+                },
+            },
+        },
+    },
+    {
         "name": "head_correlation",
         "description": (
             "Returns pairwise torque correlation between heads. Use for "
@@ -94,6 +129,8 @@ TOOL_FUNCTIONS = {
     "success_rate_per_head": lambda closures, **kw: kpi.success_rate_per_head(closures).to_dict(orient="records"),
     "torque_stats": lambda closures, **kw: kpi.torque_stats(closures, **kw),
     "capping_speed": lambda closures, **kw: kpi.capping_speed_incremental(closures).to_dict(orient="records"),
+    "success_rate_over_time": lambda closures, **kw: kpi.success_rate_over_time(closures, freq=kw.get("freq", "D")).to_dict(orient="records"),
+    "torque_distribution": lambda closures, **kw: kpi.torque_distribution(closures, **kw).to_dict(orient="records"),
     "detect_drift": lambda closures, **kw: trend.detect_drift(closures, window=kw.get("window", 50)).to_dict(orient="records"),
     "zscore_anomalies": lambda closures, **kw: anomaly.zscore_anomalies(closures, threshold=kw.get("threshold", 3.0)).to_dict(orient="records"),
     "head_correlation": lambda closures, **kw: correlation.head_torque_correlation(closures).to_dict(),

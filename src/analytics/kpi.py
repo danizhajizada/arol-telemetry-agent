@@ -2,6 +2,7 @@
 Deterministic KPI functions computed on classified closure events.
 These are exposed as "tools" to the orchestrating agent (see agent/tools.py).
 """
+import numpy as np
 import pandas as pd
 
 
@@ -48,6 +49,37 @@ def torque_stats(closures: pd.DataFrame, successful_only: bool = True) -> dict:
         "max_torque": round(float(data["app_torque"].max()), 3),
         "std_torque": round(float(data["app_torque"].std()), 3),
     }
+
+
+def success_rate_over_time(closures: pd.DataFrame, freq: str = "D") -> pd.DataFrame:
+    """Success rate broken down by time period (default daily), for spotting
+    trends or specific bad days/hours; pass freq='h' for an hourly trend."""
+    df = closures.copy()
+    df["period"] = df["timestamp"].dt.floor(freq)
+    grouped = df.groupby("period").agg(
+        total_closures=("is_reject", "count"),
+        failed=("is_reject", "sum"),
+    )
+    grouped["successful"] = grouped["total_closures"] - grouped["failed"]
+    grouped["success_rate_pct"] = (
+        100 * grouped["successful"] / grouped["total_closures"]
+    ).round(2)
+    return grouped.reset_index()
+
+
+def torque_distribution(closures: pd.DataFrame, bins: int = 10, successful_only: bool = True) -> pd.DataFrame:
+    """Histogram of applied torque values (bin edges + counts), optionally
+    restricted to successful closures only (default)."""
+    data = closures[~closures["is_reject"]] if successful_only else closures
+    if data.empty:
+        return pd.DataFrame(columns=["bin_start", "bin_end", "count"])
+
+    counts, edges = np.histogram(data["app_torque"], bins=bins)
+    return pd.DataFrame({
+        "bin_start": edges[:-1].round(3),
+        "bin_end": edges[1:].round(3),
+        "count": counts,
+    })
 
 
 def capping_speed_incremental(closures: pd.DataFrame) -> pd.DataFrame:

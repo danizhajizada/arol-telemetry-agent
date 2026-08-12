@@ -1,5 +1,5 @@
 import pandas as pd
-from src.analytics import kpi, trend, anomaly
+from src.analytics import kpi, trend, anomaly, correlation
 
 
 def _sample_closures():
@@ -40,3 +40,43 @@ def test_zscore_anomalies_flags_outlier():
     result = anomaly.zscore_anomalies(_sample_closures(), threshold=1.5)
     assert len(result) >= 1
     assert 5.0 in result["app_torque"].values
+
+
+def test_success_rate_over_time_groups_by_day():
+    closures = pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-01-01 08:00", "2026-01-01 09:00",
+            "2026-01-02 08:00", "2026-01-02 09:00",
+        ]),
+        "head_id": ["H01", "H01", "H01", "H01"],
+        "count": [1, 2, 3, 4],
+        "app_torque": [2.5, 2.5, 2.5, 2.5],
+        "status": [0, 65, 0, 0],
+        "status_label": ["Closure OK", "Bad Closure", "Closure OK", "Closure OK"],
+        "is_reject": [False, True, False, False],
+    })
+    result = kpi.success_rate_over_time(closures, freq="D")
+    assert len(result) == 2
+    assert set(result.columns) >= {"period", "total_closures", "successful", "failed", "success_rate_pct"}
+    day1 = result[result["period"] == pd.Timestamp("2026-01-01")].iloc[0]
+    assert day1["total_closures"] == 2
+    assert day1["failed"] == 1
+
+
+def test_torque_distribution_returns_bins_covering_all_rows():
+    result = kpi.torque_distribution(_sample_closures(), bins=3)
+    assert "count" in result.columns
+    assert result["count"].sum() == len(_sample_closures())
+
+
+def test_torque_distribution_empty_when_no_successful_closures():
+    all_rejected = _sample_closures().assign(is_reject=True)
+    result = kpi.torque_distribution(all_rejected, successful_only=True)
+    assert result.empty
+
+
+def test_head_torque_correlation_returns_symmetric_matrix():
+    result = correlation.head_torque_correlation(_sample_closures())
+    assert result.shape == (2, 2)
+    assert result.loc["H01", "H01"] == 1.0
+    assert result.loc["H02", "H01"] == result.loc["H01", "H02"]
