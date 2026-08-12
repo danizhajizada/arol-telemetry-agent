@@ -50,10 +50,7 @@ def detect_closures(long_df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def classify_status(
-    closures: pl.DataFrame,
-    status_codes: dict,
-) -> pl.DataFrame:
+def classify_status(closures: pl.DataFrame, status_codes: dict, ) -> pl.DataFrame:
 
     labels = {
         int(code): values["label"]
@@ -92,12 +89,7 @@ def classify_status(
     )
 
 
-def detect_idle_periods(
-    long_df: pl.DataFrame,
-    idle_status_code: int,
-    sustained_seconds: int,
-    max_gap_seconds: int = 2,
-) -> pl.DataFrame:
+def detect_idle_periods(long_df: pl.DataFrame, idle_status_code: int, sustained_seconds: int, max_gap_seconds: int = 2, ) -> pl.DataFrame:
 
     df = (
         long_df
@@ -153,4 +145,145 @@ def detect_idle_periods(
         )
         .drop("run_id")
         .sort(["head_id", "start"])
+    )
+
+def detect_machine_idle_periods(long_df: pl.DataFrame, idle_status_code: int, sustained_seconds: int, max_gap_seconds: int = 2, ) -> pl.DataFrame:
+
+    if long_df.is_empty():
+        return pl.DataFrame()
+
+    expected_heads = (
+        long_df
+        .group_by("machine_id")
+        .agg(
+            pl.col("head_id")
+            .n_unique()
+            .alias("expected_heads")
+        )
+    )
+
+    timeline = (
+        long_df
+        .group_by(
+            [
+                "machine_id",
+                "timestamp",
+            ]
+        )
+        .agg(
+            pl.col("head_id")
+            .n_unique()
+            .alias("heads_present"),
+
+            (
+                pl.col("status")
+                == idle_status_code
+            )
+            .sum()
+            .alias("idle_heads"),
+        )
+        .join(
+            expected_heads,
+            on="machine_id",
+        )
+        .with_columns(
+            (
+                (
+                    pl.col("heads_present")
+                    == pl.col("expected_heads")
+                )
+                &
+                (
+                    pl.col("idle_heads")
+                    == pl.col("expected_heads")
+                )
+            )
+            .alias("is_machine_idle")
+        )
+        .sort(
+            [
+                "machine_id",
+                "timestamp",
+            ]
+        )
+    )
+
+    timeline = (
+        timeline
+        .with_columns(
+            pl.col("timestamp")
+            .diff()
+            .over("machine_id")
+            .alias("time_gap"),
+
+            pl.col("is_machine_idle")
+            .shift(1)
+            .over("machine_id")
+            .alias("previous_idle"),
+        )
+        .with_columns(
+            (
+                pl.col("previous_idle").is_null()
+                |
+                (
+                    pl.col("is_machine_idle")
+                    != pl.col("previous_idle")
+                )
+                |
+                (
+                    pl.col("time_gap")
+                    > pl.duration(
+                        seconds=max_gap_seconds
+                    )
+                )
+            )
+            .cast(pl.Int64)
+            .cum_sum()
+            .over("machine_id")
+            .alias("run_id")
+        )
+    )
+
+    return (
+        timeline
+        .filter(
+            pl.col("is_machine_idle")
+        )
+        .group_by(
+            [
+                "machine_id",
+                "run_id",
+            ]
+        )
+        .agg(
+            pl.col("timestamp")
+            .min()
+            .alias("start"),
+
+            pl.col("timestamp")
+            .max()
+            .alias("end"),
+
+            pl.len()
+            .alias("n_rows"),
+        )
+        .with_columns(
+            (
+                pl.col("end")
+                - pl.col("start")
+            )
+            .dt.total_seconds()
+            .alias("duration_seconds")
+        )
+        .filter(
+            pl.col("duration_seconds")
+            >= sustained_seconds
+        )
+        .drop("run_id")
+        .sort(
+            [
+                "machine_id",
+                "start",
+            ]
+        )
     )

@@ -4,8 +4,8 @@ from src.closure_detection.detector import (
     detect_closures,
     classify_status,
     detect_idle_periods,
+    detect_machine_idle_periods,
 )
-
 
 def _sample_long_df():
     return (
@@ -215,3 +215,120 @@ def test_detect_closures_preserves_counter_increment():
     assert event["count"] == 103
     assert event["count_increment"] == 3
     assert event["time_since_prev_seconds"] == 1
+
+def test_machine_idle_requires_all_heads():
+
+    df = (
+        pl.DataFrame({
+            "timestamp": [
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:01",
+                "2026-01-01 00:00:02",
+                "2026-01-01 00:00:03",
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:01",
+                "2026-01-01 00:00:02",
+                "2026-01-01 00:00:03",
+            ],
+            "machine_id": ["M1"] * 8,
+            "head_id": [
+                "H01", "H01", "H01", "H01",
+                "H02", "H02", "H02", "H02",
+            ],
+            "status": [2] * 8,
+        })
+        .with_columns(
+            pl.col("timestamp")
+            .str.to_datetime()
+        )
+    )
+
+    periods = detect_machine_idle_periods(
+        df,
+        idle_status_code=2,
+        sustained_seconds=3,
+        max_gap_seconds=2,
+    )
+
+    assert periods.height == 1
+    assert periods.row(
+        0,
+        named=True,
+    )["duration_seconds"] == 3
+
+
+def test_machine_idle_breaks_when_one_head_is_active():
+
+    df = (
+        pl.DataFrame({
+            "timestamp": [
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:01",
+                "2026-01-01 00:00:02",
+                "2026-01-01 00:00:03",
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:01",
+                "2026-01-01 00:00:02",
+                "2026-01-01 00:00:03",
+            ],
+            "machine_id": ["M1"] * 8,
+            "head_id": [
+                "H01", "H01", "H01", "H01",
+                "H02", "H02", "H02", "H02",
+            ],
+            "status": [
+                2, 2, 2, 2,
+                2, 2, 0, 2,
+            ],
+        })
+        .with_columns(
+            pl.col("timestamp")
+            .str.to_datetime()
+        )
+    )
+
+    periods = detect_machine_idle_periods(
+        df,
+        idle_status_code=2,
+        sustained_seconds=3,
+        max_gap_seconds=2,
+    )
+
+    assert periods.is_empty()
+
+
+def test_machine_idle_breaks_on_large_telemetry_gap():
+
+    df = (
+        pl.DataFrame({
+            "timestamp": [
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:01",
+                "2026-01-01 00:10:00",
+                "2026-01-01 00:10:01",
+                "2026-01-01 00:00:00",
+                "2026-01-01 00:00:01",
+                "2026-01-01 00:10:00",
+                "2026-01-01 00:10:01",
+            ],
+            "machine_id": ["M1"] * 8,
+            "head_id": [
+                "H01", "H01", "H01", "H01",
+                "H02", "H02", "H02", "H02",
+            ],
+            "status": [2] * 8,
+        })
+        .with_columns(
+            pl.col("timestamp")
+            .str.to_datetime()
+        )
+    )
+
+    periods = detect_machine_idle_periods(
+        df,
+        idle_status_code=2,
+        sustained_seconds=300,
+        max_gap_seconds=2,
+    )
+
+    assert periods.is_empty()
