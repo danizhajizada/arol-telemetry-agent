@@ -123,12 +123,37 @@ TOOL_SCHEMAS = [
         "input_schema": {"type": "object", "properties": {}},
     },
 
+    {
+        "name": "torque_stats_per_head",
+        "description": (
+            "Returns average/min/max/standard deviation of applied torque, "
+            "broken down per head. Omit head_id to get all 36 heads at "
+            "once (use for comparing heads or finding which head has "
+            "highest/lowest torque variability); pass head_id to get "
+            "stats for just that one head."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "successful_only": {
+                    "type": "boolean",
+                    "description": "restrict to successful closures only (default true)",
+                },
+                "head_id": {
+                    "type": "string",
+                    "description": "optional - restrict to a single head (e.g. 'H01'); omit for all heads",
+                },
+            },
+        },
+    },
+
 ]
 
 TOOL_FUNCTIONS = {
     "success_rate": lambda closures, **kw: kpi.success_rate(closures),
     "success_rate_per_head": lambda closures, **kw: kpi.success_rate_per_head(closures).to_dict(orient="records"),
     "torque_stats": lambda closures, **kw: kpi.torque_stats(closures, **kw),
+    "torque_stats_per_head": lambda closures, **kw: kpi.torque_stats_per_head(closures, **kw),
     "capping_speed": lambda closures, **kw: kpi.capping_speed_incremental(closures).groupby("head_id")["capping_speed_pph"].last().round(1).to_dict(),
     "success_rate_over_time": lambda closures, **kw: kpi.success_rate_over_time(closures, freq=kw.get("freq", "D")).to_dict(orient="records"),
     "torque_distribution": lambda closures, **kw: kpi.torque_distribution(closures, **kw).to_dict(orient="records"),
