@@ -70,12 +70,17 @@ TOOL_SCHEMAS = [
         "name": "zscore_anomalies",
         "description": (
             "Flags individual closures with unusually high or low torque "
-            "relative to that head's normal range. Use for anomaly/outlier questions."
+            "relative to that head's normal range. Use for anomaly/outlier "
+            "questions. Returns at most `limit` rows, the most extreme first "
+            "- on a large dataset there can be far more flagged events than "
+            "that, so a raised threshold narrows results more reliably than "
+            "a raised limit."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "threshold": {"type": "number", "description": "z-score threshold, default 3.0"}
+                "threshold": {"type": "number", "description": "z-score threshold, default 3.0"},
+                "limit": {"type": "integer", "description": "max rows to return, most severe first, default 50 (capped at 500)"},
             },
         },
     },
@@ -158,6 +163,6 @@ TOOL_FUNCTIONS = {
     "success_rate_over_time": lambda closures, **kw: kpi.success_rate_over_time(closures, freq=kw.get("freq", "D")).to_dict(orient="records"),
     "torque_distribution": lambda closures, **kw: kpi.torque_distribution(closures, **kw).to_dict(orient="records"),
     "detect_drift": lambda closures, **kw: trend.detect_drift(closures, window=kw.get("window", 50)).to_dict(orient="records"),
-    "zscore_anomalies": lambda closures, **kw: anomaly.zscore_anomalies(closures, threshold=kw.get("threshold", 3.0)).to_dict(orient="records"),
+    "zscore_anomalies": lambda closures, **kw: anomaly.zscore_anomalies(closures, threshold=kw.get("threshold", 3.0), limit=kw.get("limit", 50)).to_dict(orient="records"),
     "head_correlation": lambda closures, **kw: correlation.head_torque_correlation(closures).to_dict(),
 }
