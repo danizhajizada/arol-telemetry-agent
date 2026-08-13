@@ -1,13 +1,29 @@
 """
 Deterministic KPI functions computed on classified closure events.
 These are exposed as "tools" to the orchestrating agent (see agent/tools.py).
+
+Note on "successful": the closures table includes both real capping cycles
+(status_label "Closure OK" or a reject label) and "No Load" cycles, where the
+head cycled but no cap was present (app_torque ~ 0, is_reject is False since
+it is not a failure, just an empty cycle). Torque-oriented functions below
+filter to "Closure OK" specifically (not just "not is_reject") so that
+zero-torque No Load rows don't distort averages/histograms/anomaly stats.
+success_rate* functions intentionally still count "not is_reject" as
+successful, which currently means No Load cycles count as successful
+closures — this is a known open question for the team (see B's findings
+doc), not something silently changed here.
 """
 import numpy as np
 import pandas as pd
 
 
 def success_rate(closures: pd.DataFrame) -> dict:
-    """Overall total/successful/failed closure counts and success rate percentage."""
+    """Overall total/successful/failed closure counts and success rate percentage.
+
+    "Successful" means not flagged as a reject (is_reject == False). This
+    includes "No Load" cycles (head cycled with no cap present), which are
+    not failures but are also not real capping operations — see module note.
+    """
     total = len(closures)
     if total == 0:
         return {"total_closures": 0, "successful": 0, "failed": 0, "success_rate_pct": None}
@@ -23,7 +39,11 @@ def success_rate(closures: pd.DataFrame) -> dict:
 
 
 def success_rate_per_head(closures: pd.DataFrame) -> pd.DataFrame:
-    """Per-head breakdown of closure counts and success rate."""
+    """Per-head breakdown of closure counts and success rate.
+
+    Same "not is_reject" definition of success as success_rate() — see
+    module note on No Load cycles.
+    """
     grouped = closures.groupby("head_id").agg(
         total_closures=("is_reject", "count"),
         failed=("is_reject", "sum"),
@@ -37,8 +57,18 @@ def success_rate_per_head(closures: pd.DataFrame) -> pd.DataFrame:
 
 def torque_stats(closures: pd.DataFrame, successful_only: bool = True) -> dict:
     """Average/min/max/std of applied torque, optionally filtered to
-    successful closures only (default)."""
-    data = closures[~closures["is_reject"]] if successful_only else closures
+    successful closures only (default).
+
+    When successful_only=True, restricts to status_label == "Closure OK"
+    rather than just "not is_reject", because "No Load" rows are not
+    rejects but have app_torque ~ 0 and would otherwise pull every torque
+    statistic toward zero.
+    """
+    if successful_only:
+        data = closures[closures["status_label"] == "Closure OK"]
+    else:
+        data = closures
+
     if data.empty:
         return {"count": 0}
 
@@ -53,7 +83,11 @@ def torque_stats(closures: pd.DataFrame, successful_only: bool = True) -> dict:
 
 def success_rate_over_time(closures: pd.DataFrame, freq: str = "D") -> pd.DataFrame:
     """Success rate broken down by time period (default daily), for spotting
-    trends or specific bad days/hours; pass freq='h' for an hourly trend."""
+    trends or specific bad days/hours; pass freq='h' for an hourly trend.
+
+    Same "not is_reject" definition of success as success_rate() — see
+    module note on No Load cycles.
+    """
     df = closures.copy()
     df["period"] = df["timestamp"].dt.floor(freq)
     grouped = df.groupby("period").agg(
@@ -69,8 +103,17 @@ def success_rate_over_time(closures: pd.DataFrame, freq: str = "D") -> pd.DataFr
 
 def torque_distribution(closures: pd.DataFrame, bins: int = 10, successful_only: bool = True) -> pd.DataFrame:
     """Histogram of applied torque values (bin edges + counts), optionally
-    restricted to successful closures only (default)."""
-    data = closures[~closures["is_reject"]] if successful_only else closures
+    restricted to successful closures only (default).
+
+    When successful_only=True, restricts to status_label == "Closure OK" —
+    see torque_stats() for why "not is_reject" alone is not enough (it would
+    include zero-torque "No Load" rows and skew every bin toward zero).
+    """
+    if successful_only:
+        data = closures[closures["status_label"] == "Closure OK"]
+    else:
+        data = closures
+
     if data.empty:
         return pd.DataFrame(columns=["bin_start", "bin_end", "count"])
 
@@ -84,18 +127,22 @@ def torque_distribution(closures: pd.DataFrame, bins: int = 10, successful_only:
 
 def capping_speed_incremental(closures: pd.DataFrame) -> pd.DataFrame:
     """Capping speed (pieces/hour) per head, using an incremental (running)
-    average updated as each new closure arrives."""
+    average updated as each new closure arrives.
+
+    Uses count_increment (the real counter advance recorded by Person A's
+    detector) rather than the number of closure rows, because a single row
+    can represent several physical cycles at once when the counter jumps by
+    more than 1 (e.g. after a telemetry gap). Counting rows instead of
+    count_increment would understate throughput whenever those jumps occur.
+    The first row of each head has zero elapsed time by construction, so its
+    speed is undefined (NaN).
+    """
     df = closures.sort_values(["head_id", "timestamp"]).copy()
 
-    def _incremental(group: pd.DataFrame) -> pd.DataFrame:
-        group = group.copy()
-        start_time = group["timestamp"].iloc[0]
-        elapsed_hours = (group["timestamp"] - start_time).dt.total_seconds() / 3600.0
-        piece_index = pd.Series(range(1, len(group) + 1), index=group.index)
-        group["capping_speed_pph"] = (piece_index / elapsed_hours.replace(0, pd.NA)).astype(float)
-        return group
+    start_time = df.groupby("head_id")["timestamp"].transform("min")
+    elapsed_hours = (df["timestamp"] - start_time).dt.total_seconds() / 3600.0
+    elapsed_hours = elapsed_hours.replace(0, float("nan"))
+    pieces_cumulative = df.groupby("head_id")["count_increment"].cumsum()
 
-    return (
-        df.groupby("head_id", group_keys=False)
-        .apply(_incremental)[["timestamp", "head_id", "capping_speed_pph"]]
-    )
+    df["capping_speed_pph"] = pieces_cumulative / elapsed_hours
+    return df[["timestamp", "head_id", "capping_speed_pph"]]

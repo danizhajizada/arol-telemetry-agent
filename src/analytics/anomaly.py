@@ -8,8 +8,17 @@ import pandas as pd
 
 def zscore_anomalies(closures: pd.DataFrame, threshold: float = 3.0) -> pd.DataFrame:
     """Flag closures whose torque is more than `threshold` standard
-    deviations from that head's mean torque."""
-    df = closures.copy()
+    deviations from that head's mean torque.
+
+    Restricted to status_label == "Closure OK" before computing the
+    z-score. The closures table also contains "No Load" cycles (app_torque
+    ~ 0) and known rejects; including them would make each head's torque
+    distribution bimodal (~0 Nm and ~2 Nm), which breaks the z-score's
+    assumption of a roughly unimodal distribution and produces meaningless
+    flags. Restricting to Closure OK isolates real closures so the z-score
+    actually measures deviation within otherwise-normal capping torque.
+    """
+    df = closures[closures["status_label"] == "Closure OK"].copy()
     df["torque_zscore"] = df.groupby("head_id")["app_torque"].transform(
         lambda s: (s - s.mean()) / s.std(ddof=0) if s.std(ddof=0) > 0 else 0
     )
