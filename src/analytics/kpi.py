@@ -84,18 +84,21 @@ def torque_distribution(closures: pd.DataFrame, bins: int = 10, successful_only:
 
 def capping_speed_incremental(closures: pd.DataFrame) -> pd.DataFrame:
     """Capping speed (pieces/hour) per head, using an incremental (running)
-    average updated as each new closure arrives."""
+    average updated as each new closure arrives - per spec requirement.
+    Vectorized (no groupby.apply) to avoid two real bugs found in an
+    earlier version: (1) pd.NA -> float conversion crash on the first
+    closure per head, where elapsed time is 0; (2) a pandas-version-
+    dependent bug where groupby().apply() turned head_id into the index
+    instead of a column."""
     df = closures.sort_values(["head_id", "timestamp"]).copy()
+    grouped = df.groupby("head_id")
 
-    def _incremental(group: pd.DataFrame) -> pd.DataFrame:
-        group = group.copy()
-        start_time = group["timestamp"].iloc[0]
-        elapsed_hours = (group["timestamp"] - start_time).dt.total_seconds() / 3600.0
-        piece_index = pd.Series(range(1, len(group) + 1), index=group.index)
-        group["capping_speed_pph"] = (piece_index / elapsed_hours.replace(0, pd.NA)).astype(float)
-        return group
+    start_time = grouped["timestamp"].transform("first")
+    elapsed_hours = (df["timestamp"] - start_time).dt.total_seconds() / 3600.0
+    piece_index = grouped.cumcount() + 1  # 1-based count of closures so far, per head
 
-    return (
-        df.groupby("head_id", group_keys=False)
-        .apply(_incremental)[["timestamp", "head_id", "capping_speed_pph"]]
-    )
+    speed = piece_index / elapsed_hours.replace(0, float("nan"))
+    df["capping_speed_pph"] = speed.astype(float)
+
+    return df[["timestamp", "head_id", "capping_speed_pph"]]
+

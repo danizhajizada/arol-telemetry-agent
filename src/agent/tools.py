@@ -122,13 +122,14 @@ TOOL_SCHEMAS = [
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
+
 ]
 
 TOOL_FUNCTIONS = {
     "success_rate": lambda closures, **kw: kpi.success_rate(closures),
     "success_rate_per_head": lambda closures, **kw: kpi.success_rate_per_head(closures).to_dict(orient="records"),
     "torque_stats": lambda closures, **kw: kpi.torque_stats(closures, **kw),
-    "capping_speed": lambda closures, **kw: kpi.capping_speed_incremental(closures).to_dict(orient="records"),
+    "capping_speed": lambda closures, **kw: kpi.capping_speed_incremental(closures).groupby("head_id")["capping_speed_pph"].last().round(1).to_dict(),
     "success_rate_over_time": lambda closures, **kw: kpi.success_rate_over_time(closures, freq=kw.get("freq", "D")).to_dict(orient="records"),
     "torque_distribution": lambda closures, **kw: kpi.torque_distribution(closures, **kw).to_dict(orient="records"),
     "detect_drift": lambda closures, **kw: trend.detect_drift(closures, window=kw.get("window", 50)).to_dict(orient="records"),
