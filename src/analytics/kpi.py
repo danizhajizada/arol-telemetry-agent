@@ -80,6 +80,31 @@ def torque_stats(closures: pd.DataFrame, successful_only: bool = True) -> dict:
         "std_torque": round(float(data["app_torque"].std()), 3),
     }
 
+def torque_stats_per_head(closures: pd.DataFrame, successful_only: bool = True, head_id: str = None) -> dict | list:
+    """Per-head torque stats. If head_id is given, returns just that
+    head's stats as a dict; otherwise returns all heads as a list."""
+    data = closures[~closures["is_reject"]] if successful_only else closures
+    if head_id is not None:
+        data = data[data["head_id"] == head_id]
+        if data.empty:
+            return {"count": 0}
+        return {
+            "head_id": head_id,
+            "count": int(len(data)),
+            "average_torque": round(float(data["app_torque"].mean()), 3),
+            "min_torque": round(float(data["app_torque"].min()), 3),
+            "max_torque": round(float(data["app_torque"].max()), 3),
+            "std_torque": round(float(data["app_torque"].std()), 3),
+        }
+
+    return (
+        data.groupby("head_id")["app_torque"]
+        .agg(count="count", average_torque="mean", min_torque="min", max_torque="max", std_torque="std")
+        .round(3)
+        .reset_index()
+        .to_dict(orient="records")
+    )
+
 
 def success_rate_over_time(closures: pd.DataFrame, freq: str = "D") -> pd.DataFrame:
     """Success rate broken down by time period (default daily), for spotting
@@ -138,6 +163,7 @@ def capping_speed_incremental(closures: pd.DataFrame) -> pd.DataFrame:
     speed is undefined (NaN).
     """
     df = closures.sort_values(["head_id", "timestamp"]).copy()
+    grouped = df.groupby("head_id")
 
     start_time = df.groupby("head_id")["timestamp"].transform("min")
     elapsed_hours = (df["timestamp"] - start_time).dt.total_seconds() / 3600.0

@@ -5,8 +5,13 @@ python -m src.cli ask "What is the average closing torque for successful closure
 python -m src.cli report kpi
 python -m src.cli report anomalies
 python -m src.cli report drift
+python -m src.cli chat
 """
+import time
+import sys
+sys.stdout.reconfigure(encoding="utf-8")
 
+import pandas as pd
 import logging
 from pathlib import Path
 
@@ -231,9 +236,13 @@ def _run_agent(
     """
     Preserve the existing Person B/C pandas interface.
     """
+    df = closures.to_pandas()
+    df["is_reject"] = df["is_reject"].astype(bool)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
     return run_agent(
         question,
-        closures.to_pandas(),
+        df,
         config,
     )
 
@@ -246,15 +255,17 @@ def ask(
     """Ask a free-text question about the telemetry data."""
 
     config = _load_config(pool)
-    closures = _prepare_closures(config)
 
-    typer.echo(
-        _run_agent(
-            question,
-            closures,
-            config,
-        )
-    )
+    t0 = time.time()
+    closures = _prepare_closures(config)
+    t1 = time.time()
+    typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures)} rows)")
+
+    answer = _run_agent(question, closures, config)
+    t2 = time.time()
+    typer.echo(f"[TIMING] Agent total: {t2 - t1:.2f}s")
+
+    typer.echo(answer)
 
 
 @app.command()
@@ -272,15 +283,48 @@ def report(
         raise typer.Exit(code=1)
 
     config = _load_config(pool)
-    closures = _prepare_closures(config)
 
-    typer.echo(
-        _run_agent(
-            CANNED_REQUESTS[kind],
-            closures,
-            config,
-        )
-    )
+    t0 = time.time()
+    closures = _prepare_closures(config)
+    t1 = time.time()
+    typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures)} rows)")
+
+    answer = _run_agent(CANNED_REQUESTS[kind], closures, config)
+    t2 = time.time()
+    typer.echo(f"[TIMING] Agent total: {t2 - t1:.2f}s")
+
+    typer.echo(answer)
+
+
+@app.command()
+def chat(pool: str = "config/config.yaml"):
+    """Interactive question loop against the real telemetry data. Type 'exit' or 'quit' to stop."""
+    config = _load_config(pool)
+
+    t0 = time.time()
+    closures_pl = _prepare_closures(config)
+    t1 = time.time()
+    typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures_pl)} rows)")
+
+    t_convert = time.time()
+    closures = closures_pl.to_pandas()
+    closures["is_reject"] = closures["is_reject"].astype(bool)
+    closures["timestamp"] = pd.to_datetime(closures["timestamp"])
+    typer.echo(f"[TIMING] Convert to pandas: {time.time() - t_convert:.2f}s")
+
+    typer.echo("AROL telemetry agent - interactive mode (real data)")
+    typer.echo("Type a question, or 'exit' to quit.\n")
+
+    while True:
+        question = typer.prompt("You")
+        if question.strip().lower() in {"exit", "quit"}:
+            typer.echo("Goodbye.")
+            break
+
+        q_start = time.time()
+        answer = run_agent(question, closures, config)   # <- call run_agent directly, not _run_agent
+        typer.echo(f"[TIMING] Agent total: {time.time() - q_start:.2f}s")
+        typer.echo(f"\n{answer}\n")
 
 
 if __name__ == "__main__":

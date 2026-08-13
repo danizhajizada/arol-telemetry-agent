@@ -6,6 +6,7 @@ names here.
 """
 import json
 import logging
+import time
 
 import anthropic
 import pandas as pd
@@ -31,9 +32,11 @@ def _run_tool(name: str, tool_input: dict, closures: pd.DataFrame) -> str:
     usable response to reason about (graceful failure)."""
     if name not in TOOL_FUNCTIONS:
         return json.dumps({"error": f"Unknown tool '{name}'."})
-
+    t0 = time.time()
     try:
         result = TOOL_FUNCTIONS[name](closures, **tool_input)
+        elapsed = time.time() - t0
+        logger.info("[TIMING] Tool '%s' took %.2fs", name, elapsed)
         return json.dumps(result, default=str)
     except Exception as exc:
         logger.warning("Tool '%s' failed with input %s: %s", name, tool_input, exc)
@@ -42,11 +45,15 @@ def _run_tool(name: str, tool_input: dict, closures: pd.DataFrame) -> str:
 
 def run_agent(user_request: str, closures: pd.DataFrame, config: dict) -> str:
     """Runs the full tool-calling loop and returns the LLM's final text report."""
-    client = anthropic.Anthropic()
+    if not user_request or not user_request.strip():
+        return "Please provide a question - I received an empty request."
+
+    client = anthropic.Anthropic(api_key=config["llm"].get("ANTHROPIC_API_KEY"))
     llm_config = config["llm"]
     messages = [{"role": "user", "content": user_request}]
 
     for _ in range(llm_config["max_tool_call_rounds"]):
+        t0 = time.time()
         response = client.messages.create(
             model=llm_config["model"],
             max_tokens=llm_config["max_tokens"],
@@ -54,7 +61,7 @@ def run_agent(user_request: str, closures: pd.DataFrame, config: dict) -> str:
             tools=TOOL_SCHEMAS,
             messages=messages,
         )
-
+        logger.info("[TIMING] LLM call took %.2fs", time.time() - t0)
         if response.stop_reason != "tool_use":
             return next(
                 (b.text for b in response.content if b.type == "text"),
@@ -62,6 +69,10 @@ def run_agent(user_request: str, closures: pd.DataFrame, config: dict) -> str:
             )
 
         tool_uses = [b for b in response.content if b.type == "tool_use"]
+
+        if not tool_uses:
+            return "The agent indicated a tool call but none was found."
+
         messages.append({"role": "assistant", "content": response.content})
 
         tool_results = []
