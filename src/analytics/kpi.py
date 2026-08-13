@@ -82,8 +82,17 @@ def torque_stats(closures: pd.DataFrame, successful_only: bool = True) -> dict:
 
 def torque_stats_per_head(closures: pd.DataFrame, successful_only: bool = True, head_id: str = None) -> dict | list:
     """Per-head torque stats. If head_id is given, returns just that
-    head's stats as a dict; otherwise returns all heads as a list."""
-    data = closures[~closures["is_reject"]] if successful_only else closures
+    head's stats as a dict; otherwise returns all heads as a list.
+
+    When successful_only=True, restricts to status_label == "Closure OK" —
+    see torque_stats() for why "not is_reject" alone is not enough (it would
+    include zero-torque "No Load" rows and skew every head's stats toward
+    zero).
+    """
+    if successful_only:
+        data = closures[closures["status_label"] == "Closure OK"]
+    else:
+        data = closures
     if head_id is not None:
         data = data[data["head_id"] == head_id]
         if data.empty:
