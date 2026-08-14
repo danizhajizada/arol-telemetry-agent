@@ -31,6 +31,19 @@ Other minor divergences: data source (AROL: curated "data pools" provided direct
 Polito: pulled from Cloud into local persistence), machine name (AROL: generic; Polito:
 named **Equatorque**), and deliverable format (see 8).
 
+### Team decision (2026-08-14)
+
+The team has decided to **prioritize the AROL deck framing as the primary target**
+for this project: the single LLM "report agent" orchestrating deterministic tools
+(section 3 Objective, section 8 "AROL deck version" deliverables). The Polito
+brief's MAS framing (section 6, and the "Polito brief version" deliverables in
+section 8) is kept below **for reference only** and is not the current
+implementation target — it should not drive further architectural changes (e.g. no
+need to split ingestion/cleaning and analytics into separate communicating agents)
+unless the team revisits this decision. Nothing in sections 4, 5, 7, 10, or 11 is
+affected by this — that content (data schema, status codes, core tasks, example
+queries/outputs) comes from the AROL side and remains fully in scope.
+
 ## 3. Objective
 
 Design and implement an Agentic AI / Multi-Agent application that:
@@ -112,7 +125,7 @@ sustained period (e.g. 300s).
 - Logging, error handling, test cases on at least one dataset pool.
 - Documented build/run instructions.
 
-## 6. MAS-specific objectives (Polito brief)
+## 6. MAS-specific objectives (Polito brief — deprioritized per team decision, kept for reference)
 
 - **Data Ingestion & Local Synchronization**: pull raw datasets from Cloud, manage a
   local persistence layer.
@@ -141,7 +154,7 @@ sustained period (e.g. 300s).
 
 ## 8. Deliverables
 
-**AROL deck version:**
+**AROL deck version (primary target — see Team decision in section 2):**
 - Source code repository (clean structure, reproducible run).
 - Report templates (Markdown/HTML/PDF export).
 - Sample generated reports.
@@ -150,7 +163,7 @@ sustained period (e.g. 300s).
 - Demo: one end-to-end run loading a dataset pool and generating ≥2 report types.
 - Short final presentation (10–15 slides).
 
-**Polito brief version:**
+**Polito brief version (reference only, not the current target):**
 - Source files.
 - A plain-ASCII **README** with compile/run instructions, execution parameters, dataset
   formats.
