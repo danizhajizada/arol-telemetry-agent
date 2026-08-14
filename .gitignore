@@ -13,3 +13,5 @@ data/*
 *.sqlite
 *.sqlite3
 .claude
+
+output/

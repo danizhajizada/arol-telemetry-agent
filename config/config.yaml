@@ -44,6 +44,10 @@ analytics:
   anomaly_zscore_threshold: 3.0
   drift_threshold_pct: 0.10
 
+output:
+  plots_dir: "output/plots/"
+  reports_dir: "output/reports/"
+
 llm:
   provider: "anthropic"
   model: "claude-sonnet-5"
