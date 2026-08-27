@@ -7,7 +7,16 @@ TOOL_SCHEMAS is what gets sent to the LLM - plain descriptions, no code.
 TOOL_FUNCTIONS maps each tool name back to the real Python function that
 actually runs on the closures dataframe.
 """
-from src.analytics import kpi, trend, anomaly, correlation
+from src.analytics import kpi, trend, anomaly, correlation, plots
+
+
+def _plots_dir(config: dict | None) -> str:
+    """Resolves the plot output directory from config; falls back to a
+    default if config is missing the key (e.g. in ad-hoc calls/tests)."""
+    if config and "output" in config:
+        return config["output"].get("plots_dir", "output/plots/")
+    return "output/plots/"
+
 
 TOOL_SCHEMAS = [
     {
@@ -152,17 +161,105 @@ TOOL_SCHEMAS = [
         },
     },
 
+    {
+        "name": "plot_torque_over_time",
+        "description": (
+            "Renders and saves a plot of applied torque over time for successful "
+            "closures, and returns the file path. Use when the user asks to plot, "
+            "chart, show, or visualize torque over time. Omit head_id to plot all "
+            "heads; pass head_id to plot just one."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "head_id": {
+                    "type": "string",
+                    "description": "optional - restrict the plot to a single head (e.g. 'H01'); omit for all heads",
+                }
+            },
+        },
+    },
+    {
+        "name": "plot_torque_histogram",
+        "description": (
+            "Renders and saves a histogram of applied torque values, and returns "
+            "the file path. Use when the user asks to plot, chart, show, or "
+            "visualize the torque distribution."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bins": {"type": "integer", "description": "number of histogram bins, default 20"},
+                "successful_only": {
+                    "type": "boolean",
+                    "description": "restrict to successful closures only (default true)",
+                },
+            },
+        },
+    },
+    {
+        "name": "plot_success_rate_per_head",
+        "description": (
+            "Renders and saves a bar chart of success rate per head, sorted "
+            "worst to best, and returns the file path. Use when the user asks "
+            "to plot, chart, show, or visualize per-head success rate."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "plot_failed_closures_over_time",
+        "description": (
+            "Renders and saves a bar chart of failed closure counts over time "
+            "(daily by default), and returns the file path. Use when the user "
+            "asks to plot, chart, show, or visualize failures over time."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "freq": {
+                    "type": "string",
+                    "description": "pandas offset alias for the time bucket, e.g. 'D' for daily, 'h' for hourly (default 'D')",
+                }
+            },
+        },
+    },
+    {
+        "name": "plot_dashboard_summary",
+        "description": (
+            "Renders and saves a combined dashboard (success rate per head, "
+            "torque histogram, torque over time, failed closures per day) as "
+            "one image, and returns the file path. Use for broad 'show me a "
+            "dashboard' or 'summarize visually' requests."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+
 ]
 
 TOOL_FUNCTIONS = {
-    "success_rate": lambda closures, **kw: kpi.success_rate(closures),
-    "success_rate_per_head": lambda closures, **kw: kpi.success_rate_per_head(closures).to_dict(orient="records"),
-    "torque_stats": lambda closures, **kw: kpi.torque_stats(closures, **kw),
-    "torque_stats_per_head": lambda closures, **kw: kpi.torque_stats_per_head(closures, **kw),
-    "capping_speed": lambda closures, **kw: kpi.capping_speed_incremental(closures).groupby("head_id")["capping_speed_pph"].last().round(1).to_dict(),
-    "success_rate_over_time": lambda closures, **kw: kpi.success_rate_over_time(closures, freq=kw.get("freq", "D")).to_dict(orient="records"),
-    "torque_distribution": lambda closures, **kw: kpi.torque_distribution(closures, **kw).to_dict(orient="records"),
-    "detect_drift": lambda closures, **kw: trend.detect_drift(closures, window=kw.get("window", 50)).to_dict(orient="records"),
-    "zscore_anomalies": lambda closures, **kw: anomaly.zscore_anomalies(closures, threshold=kw.get("threshold", 3.0), limit=kw.get("limit", 50)).to_dict(orient="records"),
-    "head_correlation": lambda closures, **kw: correlation.head_torque_correlation(closures).to_dict(),
+    "success_rate": lambda closures, config=None, **kw: kpi.success_rate(closures),
+    "success_rate_per_head": lambda closures, config=None, **kw: kpi.success_rate_per_head(closures).to_dict(orient="records"),
+    "torque_stats": lambda closures, config=None, **kw: kpi.torque_stats(closures, **kw),
+    "torque_stats_per_head": lambda closures, config=None, **kw: kpi.torque_stats_per_head(closures, **kw),
+    "capping_speed": lambda closures, config=None, **kw: kpi.capping_speed_incremental(closures).groupby("head_id")["capping_speed_pph"].last().round(1).to_dict(),
+    "success_rate_over_time": lambda closures, config=None, **kw: kpi.success_rate_over_time(closures, freq=kw.get("freq", "D")).to_dict(orient="records"),
+    "torque_distribution": lambda closures, config=None, **kw: kpi.torque_distribution(closures, **kw).to_dict(orient="records"),
+    "detect_drift": lambda closures, config=None, **kw: trend.detect_drift(closures, window=kw.get("window", 50)).to_dict(orient="records"),
+    "zscore_anomalies": lambda closures, config=None, **kw: anomaly.zscore_anomalies(closures, threshold=kw.get("threshold", 3.0), limit=kw.get("limit", 50)).to_dict(orient="records"),
+    "head_correlation": lambda closures, config=None, **kw: correlation.head_torque_correlation(closures).to_dict(),
+    "plot_torque_over_time": lambda closures, config=None, **kw: plots.plot_torque_over_time(
+        closures, output_dir=_plots_dir(config), **kw
+    ),
+    "plot_torque_histogram": lambda closures, config=None, **kw: plots.plot_torque_histogram(
+        closures, output_dir=_plots_dir(config), **kw
+    ),
+    "plot_success_rate_per_head": lambda closures, config=None, **kw: plots.plot_success_rate_per_head(
+        closures, output_dir=_plots_dir(config)
+    ),
+    "plot_failed_closures_over_time": lambda closures, config=None, **kw: plots.plot_failed_closures_over_time(
+        closures, output_dir=_plots_dir(config), **kw
+    ),
+    "plot_dashboard_summary": lambda closures, config=None, **kw: plots.plot_dashboard_summary(
+        closures, output_dir=_plots_dir(config)
+    ),
 }

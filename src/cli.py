@@ -30,7 +30,8 @@ from src.closure_detection.detector import (
     detect_closures,
     classify_status,
 )
-from src.agent.orchestrator import run_agent
+from src.agent.orchestrator import run_agent, AgentResult
+from src.reporting.report_builder import save_text_report
 
 
 app = typer.Typer(help="AROL telemetry agent CLI")
@@ -232,7 +233,7 @@ def _run_agent(
     question: str,
     closures: pl.DataFrame,
     config: dict,
-):
+) -> AgentResult:
     """
     Preserve the existing Person B/C pandas interface.
     """
@@ -261,11 +262,15 @@ def ask(
     t1 = time.time()
     typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures)} rows)")
 
-    answer = _run_agent(question, closures, config)
+    result = _run_agent(question, closures, config)
     t2 = time.time()
     typer.echo(f"[TIMING] Agent total: {t2 - t1:.2f}s")
 
-    typer.echo(answer)
+    typer.echo(result.text)
+    if result.generated_files:
+        typer.echo("\nGenerated charts:")
+        for file_path in result.generated_files:
+            typer.echo(f"  - {file_path}")
 
 
 @app.command()
@@ -273,7 +278,7 @@ def report(
     kind: str,
     pool: str = "config/config.yaml",
 ):
-    """Generate a canned KPI, anomaly, or drift report."""
+    """Generate a canned KPI, anomaly, or drift report and save it to disk."""
 
     if kind not in CANNED_REQUESTS:
         typer.echo(
@@ -289,11 +294,16 @@ def report(
     t1 = time.time()
     typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures)} rows)")
 
-    answer = _run_agent(CANNED_REQUESTS[kind], closures, config)
+    question = CANNED_REQUESTS[kind]
+    result = _run_agent(question, closures, config)
     t2 = time.time()
     typer.echo(f"[TIMING] Agent total: {t2 - t1:.2f}s")
 
-    typer.echo(answer)
+    typer.echo(result.text)
+
+    reports_dir = config.get("output", {}).get("reports_dir", "output/reports/")
+    saved_path = save_text_report(kind, question, result.text, result.generated_files, reports_dir)
+    typer.echo(f"\n[SAVED] Report written to {saved_path}")
 
 
 @app.command()
@@ -322,9 +332,14 @@ def chat(pool: str = "config/config.yaml"):
             break
 
         q_start = time.time()
-        answer = run_agent(question, closures, config)   # <- call run_agent directly, not _run_agent
+        result = run_agent(question, closures, config)   # <- call run_agent directly, not _run_agent
         typer.echo(f"[TIMING] Agent total: {time.time() - q_start:.2f}s")
-        typer.echo(f"\n{answer}\n")
+        typer.echo(f"\n{result.text}\n")
+        if result.generated_files:
+            typer.echo("Generated charts:")
+            for file_path in result.generated_files:
+                typer.echo(f"  - {file_path}")
+            typer.echo("")
 
 
 if __name__ == "__main__":
