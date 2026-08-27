@@ -41,12 +41,18 @@ def _downsample(df: pd.DataFrame, max_points: int = _MAX_SCATTER_POINTS) -> pd.D
     return df.iloc[::step]
 
 
-def plot_torque_over_time(closures: pd.DataFrame, output_dir: str, head_id: str = None) -> dict:
+def plot_torque_over_time(closures: pd.DataFrame, output_dir: str, head_id: str = None,
+                           start_date: str = None, end_date: str = None) -> dict:
     """Line/scatter plot of applied torque over time for successful closures,
-    optionally restricted to one head; saves a PNG and returns its path."""
+    optionally restricted to one head and/or a date range; saves a PNG and
+    returns its path."""
     data = closures[closures["status_label"] == "Closure OK"]
     if head_id is not None:
         data = data[data["head_id"] == head_id]
+    if start_date is not None:
+        data = data[data["timestamp"] >= start_date]
+    if end_date is not None:
+        data = data[data["timestamp"] <= end_date]
 
     if data.empty:
         return {"error": "No successful closures to plot for the given filter."}
@@ -54,10 +60,14 @@ def plot_torque_over_time(closures: pd.DataFrame, output_dir: str, head_id: str 
     data = data.sort_values("timestamp")
     fig, ax = plt.subplots(figsize=(10, 4))
 
+    period_str = ""
+    if start_date or end_date:
+        period_str = f" ({start_date or '...'} to {end_date or '...'})"
+
     if head_id is not None:
         plotted = _downsample(data)
         ax.plot(plotted["timestamp"], plotted["app_torque"], marker=".", markersize=2, linestyle="")
-        title = f"Torque over time - {head_id}"
+        title = f"Torque over time - {head_id}{period_str}"
     else:
         heads = data["head_id"].unique()
         plotted = _downsample(data)
@@ -70,7 +80,7 @@ def plot_torque_over_time(closures: pd.DataFrame, output_dir: str, head_id: str 
             )
         if show_legend:
             ax.legend(loc="upper right", fontsize="small", ncol=2)
-        title = "Torque over time - all heads"
+        title = f"Torque over time - all heads{period_str}"
 
     ax.set_xlabel("Timestamp")
     ax.set_ylabel("Applied torque (Nm)")
@@ -85,7 +95,6 @@ def plot_torque_over_time(closures: pd.DataFrame, output_dir: str, head_id: str 
         "points_plotted": int(len(plotted)),
         "points_available": int(len(data)),
     }
-
 
 def plot_torque_histogram(closures: pd.DataFrame, output_dir: str, bins: int = 20, successful_only: bool = True) -> dict:
     """Histogram of applied torque values; saves a PNG and returns its path."""
@@ -201,3 +210,38 @@ def plot_dashboard_summary(closures: pd.DataFrame, output_dir: str) -> dict:
 
     path = _save_and_close(fig, output_dir, "dashboard_summary")
     return {"file": path, "chart_type": "dashboard", "title": "Capping process dashboard summary"}
+
+
+def plot_failures_per_head(closures: pd.DataFrame, output_dir: str,
+                             start_date: str = None, end_date: str = None) -> dict:
+    """Bar chart of raw failure count per head, sorted worst to best,
+    optionally restricted to a date range; saves a PNG and returns its path."""
+    data = closures
+    if start_date is not None:
+        data = data[data["timestamp"] >= start_date]
+    if end_date is not None:
+        data = data[data["timestamp"] <= end_date]
+
+    if data.empty:
+        return {"error": "No closures to plot for the given filter."}
+
+    grouped = data.groupby("head_id")["is_reject"].sum().sort_values(ascending=False)
+
+    period_str = f" ({start_date or '...'} to {end_date or '...'})" if (start_date or end_date) else ""
+
+    fig, ax = plt.subplots(figsize=(max(6, len(grouped) * 0.3), 4))
+    ax.bar(grouped.index.astype(str), grouped.values, color="#C44E52")
+    ax.set_xlabel("Head")
+    ax.set_ylabel("Failed closures (count)")
+    ax.set_title(f"Failed closures per head{period_str}")
+    plt.setp(ax.get_xticklabels(), rotation=90 if len(grouped) > 15 else 0)
+
+    path = _save_and_close(fig, output_dir, "failures_per_head")
+    return {
+        "file": path,
+        "chart_type": "bar",
+        "title": f"Failed closures per head{period_str}",
+        "heads_plotted": int(len(grouped)),
+        "highest_head": str(grouped.index[0]),
+        "highest_failure_count": int(grouped.iloc[0]),
+    }

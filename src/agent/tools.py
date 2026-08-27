@@ -93,12 +93,15 @@ TOOL_SCHEMAS = [
             },
         },
     },
-    {
+       {
         "name": "success_rate_over_time",
         "description": (
             "Returns success rate broken down by time period (daily by "
-            "default). Use for questions about how success rate evolved over "
-            "time, daily/hourly breakdowns, or abnormal time intervals."
+            "default). Optionally restrict to one head to check whether "
+            "that head's failures cluster in a specific time window. Use "
+            "for questions about how success rate evolved over time, "
+            "daily/hourly breakdowns, abnormal time intervals, or "
+            "per-head failure timing."
         ),
         "input_schema": {
             "type": "object",
@@ -106,7 +109,11 @@ TOOL_SCHEMAS = [
                 "freq": {
                     "type": "string",
                     "description": "pandas offset alias for the time bucket, e.g. 'D' for daily, 'h' for hourly (default 'D')",
-                }
+                },
+                "head_id": {
+                    "type": "string",
+                    "description": "optional - restrict to one head, e.g. 'H29'",
+                },
             },
         },
     },
@@ -161,24 +168,23 @@ TOOL_SCHEMAS = [
         },
     },
 
-    {
-        "name": "plot_torque_over_time",
-        "description": (
-            "Renders and saves a plot of applied torque over time for successful "
-            "closures, and returns the file path. Use when the user asks to plot, "
-            "chart, show, or visualize torque over time. Omit head_id to plot all "
-            "heads; pass head_id to plot just one."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "head_id": {
-                    "type": "string",
-                    "description": "optional - restrict the plot to a single head (e.g. 'H01'); omit for all heads",
-                }
-            },
+   {
+    "name": "plot_torque_over_time",
+    "description": (
+        "Saves a scatter plot of applied torque over time for successful "
+        "closures. Optionally restrict to one head and/or a date range "
+        "(e.g. a specific month). Use for questions asking to plot/chart/"
+        "visualize torque over time, optionally for a specific head or period."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "head_id": {"type": "string", "description": "optional - restrict to one head, e.g. 'H01'"},
+            "start_date": {"type": "string", "description": "optional - ISO date, e.g. '2026-03-01'"},
+            "end_date": {"type": "string", "description": "optional - ISO date, e.g. '2026-03-31'"},
         },
     },
+},
     {
         "name": "plot_torque_histogram",
         "description": (
@@ -233,6 +239,16 @@ TOOL_SCHEMAS = [
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
+    {
+    "name": "plot_failures_per_head",
+    "description": (
+        "Saves a bar chart of raw failure count per head (not success "
+        "rate percentage, which is uninformative since it rounds to ~100% "
+        "for every head). Use for questions asking to plot/chart failures "
+        "or problems per head."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+    },
 
 ]
 
@@ -242,14 +258,12 @@ TOOL_FUNCTIONS = {
     "torque_stats": lambda closures, config=None, **kw: kpi.torque_stats(closures, **kw),
     "torque_stats_per_head": lambda closures, config=None, **kw: kpi.torque_stats_per_head(closures, **kw),
     "capping_speed": lambda closures, config=None, **kw: kpi.capping_speed_incremental(closures).groupby("head_id")["capping_speed_pph"].last().round(1).to_dict(),
-    "success_rate_over_time": lambda closures, config=None, **kw: kpi.success_rate_over_time(closures, freq=kw.get("freq", "D")).to_dict(orient="records"),
+    "success_rate_over_time": lambda closures, **kw: kpi.success_rate_over_time(closures, freq=kw.get("freq", "D"), head_id=kw.get("head_id")).to_dict(orient="records"),
     "torque_distribution": lambda closures, config=None, **kw: kpi.torque_distribution(closures, **kw).to_dict(orient="records"),
     "detect_drift": lambda closures, config=None, **kw: trend.detect_drift(closures, window=kw.get("window", 50)).to_dict(orient="records"),
     "zscore_anomalies": lambda closures, config=None, **kw: anomaly.zscore_anomalies(closures, threshold=kw.get("threshold", 3.0), limit=kw.get("limit", 50)).to_dict(orient="records"),
     "head_correlation": lambda closures, config=None, **kw: correlation.head_torque_correlation(closures).to_dict(),
-    "plot_torque_over_time": lambda closures, config=None, **kw: plots.plot_torque_over_time(
-        closures, output_dir=_plots_dir(config), **kw
-    ),
+    "plot_torque_over_time": lambda closures, **kw: plots.plot_torque_over_time(closures, output_dir="output/plots", head_id=kw.get("head_id"), start_date=kw.get("start_date"), end_date=kw.get("end_date")),
     "plot_torque_histogram": lambda closures, config=None, **kw: plots.plot_torque_histogram(
         closures, output_dir=_plots_dir(config), **kw
     ),
@@ -262,4 +276,5 @@ TOOL_FUNCTIONS = {
     "plot_dashboard_summary": lambda closures, config=None, **kw: plots.plot_dashboard_summary(
         closures, output_dir=_plots_dir(config)
     ),
+    "plot_failures_per_head": lambda closures, **kw: plots.plot_failures_per_head(closures, output_dir="output/plots"),
 }

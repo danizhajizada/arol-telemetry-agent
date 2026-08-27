@@ -115,14 +115,16 @@ def torque_stats_per_head(closures: pd.DataFrame, successful_only: bool = True, 
     )
 
 
-def success_rate_over_time(closures: pd.DataFrame, freq: str = "D") -> pd.DataFrame:
+def success_rate_over_time(closures: pd.DataFrame, freq: str = "D", head_id: str = None) -> pd.DataFrame:
     """Success rate broken down by time period (default daily), for spotting
     trends or specific bad days/hours; pass freq='h' for an hourly trend.
+    Optionally restrict to a single head via head_id, to check whether
+    that head's failures cluster in a specific time window.
 
-    Same "not is_reject" definition of success as success_rate() — see
+    Same "not is_reject" definition of success as success_rate() - see
     module note on No Load cycles.
     """
-    df = closures.copy()
+    df = closures[closures["head_id"] == head_id] if head_id is not None else closures.copy()
     df["period"] = df["timestamp"].dt.floor(freq)
     grouped = df.groupby("period").agg(
         total_closures=("is_reject", "count"),
