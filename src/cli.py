@@ -271,8 +271,10 @@ def ask(
         typer.echo("\nGenerated charts:")
         for file_path in result.generated_files:
             typer.echo(f"  - {file_path}")
-
-
+    reports_dir = config.get("output", {}).get("reports_dir", "output/reports/")
+    saved_path = save_text_report("ask", question, result.text, result.generated_files, reports_dir)
+    typer.echo(f"\n[SAVED] Report written to {saved_path}")
+    
 @app.command()
 def report(
     kind: str,
