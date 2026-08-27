@@ -240,7 +240,7 @@ def _run_agent(
     df = closures.to_pandas()
     df["is_reject"] = df["is_reject"].astype(bool)
     df["timestamp"] = pd.to_datetime(df["timestamp"])
-
+    del closures
     return run_agent(
         question,
         df,
