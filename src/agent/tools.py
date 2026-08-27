@@ -9,6 +9,55 @@ actually runs on the closures dataframe.
 """
 from src.analytics import kpi, trend, anomaly, correlation, plots
 
+_READINGS = None
+_READINGS_CONFIG = None
+_READINGS_CACHE = None
+
+def _get_readings():
+    """Returns the readings table, loading it from disk only the first
+    time it's actually needed - not automatically every time a command
+    runs. This is what prevents readings from being loaded for questions
+    that never touch it (e.g. success rate), which was wasting memory
+    and contributing to an out-of-memory crash during the closures
+    Polars->pandas conversion.
+
+    Works correctly for a single ask/report question just as well as a
+    multi-question chat session, with no special-case code needed for
+    either: whichever tool call happens to need readings first triggers
+    the one-time load; every call after that (including later questions
+    in the same chat session) reuses the same already-loaded copy
+    instead of reloading from disk."""
+    global _READINGS_CACHE
+
+    # Box is still empty (nobody has loaded readings yet this run/session)
+    # AND we know where to load it from (set_readings_config was called).
+    if _READINGS_CACHE is None and _READINGS_CONFIG is not None:
+        from src.ingestion import db
+        # Actually load it now - the one and only time this happens,
+        # unless set_readings_config() is called again later with new config.
+        _READINGS_CACHE = db.load_readings(_READINGS_CONFIG)
+
+    # Either just-loaded fresh data, or the already-cached copy from
+    # an earlier call - the caller doesn't need to know which.
+    return _READINGS_CACHE
+
+
+def set_readings_config(config: dict) -> None:
+    """Called once at the start of ask/report/chat, before any question
+    is answered. Doesn't load anything itself - just remembers WHERE
+    readings could be loaded from later, if a tool ever actually needs
+    it. This is what _get_readings() checks before deciding to load."""
+    global _READINGS_CONFIG, _READINGS_CACHE
+    _READINGS_CONFIG = config
+    _READINGS_CACHE = None  # reset any previously cached data, since
+                              # this might be a new run with different config/data
+
+
+def set_readings(readings) -> None:
+    """Called once in cli.py after loading, so idle-related tools have
+    access to the readings table."""
+    global _READINGS
+    _READINGS = readings
 
 def _plots_dir(config: dict | None) -> str:
     """Resolves the plot output directory from config; falls back to a
@@ -249,6 +298,36 @@ TOOL_SCHEMAS = [
     ),
     "input_schema": {"type": "object", "properties": {}},
     },
+    {
+    "name": "idle_time",
+    "description": (
+        "Reports total and average idle time per head (that specific "
+        "head stopped, others may still be running), plus how many "
+        "separate idle periods. Use for questions about idle time or "
+        "downtime for a specific head or across heads."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "sustained_seconds": {"type": "integer", "description": "minimum idle duration in seconds, default 300"}
+        },
+    },
+   },
+   {
+    "name": "machine_idle_periods",
+    "description": (
+        "Reports periods when the ENTIRE machine (all heads at once) was "
+        "idle together, with exact start/end times. Use for questions "
+        "about full-line downtime, shutdowns, or confirming whether a "
+        "shared event affected all heads simultaneously."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "sustained_seconds": {"type": "integer", "description": "minimum idle duration in seconds, default 300"}
+        },
+     },
+    },
 
 ]
 
@@ -277,4 +356,6 @@ TOOL_FUNCTIONS = {
         closures, output_dir=_plots_dir(config)
     ),
     "plot_failures_per_head": lambda closures, **kw: plots.plot_failures_per_head(closures, output_dir="output/plots"),
+    "idle_time": lambda closures, **kw: kpi.idle_time_per_head(  _get_readings(), sustained_seconds=kw.get("sustained_seconds", 300)),
+    "machine_idle_periods": lambda closures, **kw: kpi.machine_idle_periods_summary(  _get_readings(), sustained_seconds=kw.get("sustained_seconds", 300)),
 }

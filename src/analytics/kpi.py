@@ -183,3 +183,53 @@ def capping_speed_incremental(closures: pd.DataFrame) -> pd.DataFrame:
 
     df["capping_speed_pph"] = pieces_cumulative / elapsed_hours
     return df[["timestamp", "head_id", "capping_speed_pph"]]
+
+
+def idle_time_per_head(readings, sustained_seconds: int = 300) -> dict:
+    """Total/average idle time per head, based on sustained 'No Load'
+    periods where that specific head stopped (other heads may still be
+    running). Operates on `readings`, not `closures` - genuinely idle
+    seconds never become closures by design."""
+    from src.closure_detection.detector import detect_idle_periods
+    import polars as pl
+
+    idle_df = detect_idle_periods(readings, idle_status_code=2, sustained_seconds=sustained_seconds)
+    if idle_df.is_empty():
+        return {}
+
+    summary = idle_df.group_by("head_id").agg([
+        pl.col("duration_seconds").sum().alias("total_idle_seconds"),
+        pl.col("duration_seconds").mean().alias("avg_idle_seconds"),
+        pl.len().alias("idle_periods"),
+    ])
+
+    return {
+        row["head_id"]: {
+            "total_idle_minutes": round(row["total_idle_seconds"] / 60, 1),
+            "avg_idle_minutes": round(row["avg_idle_seconds"] / 60, 1),
+            "idle_periods": row["idle_periods"],
+        }
+        for row in summary.to_dicts()
+    }
+
+
+def machine_idle_periods_summary(readings, sustained_seconds: int = 300) -> list:
+    """Summary of times the ENTIRE machine (all heads simultaneously) went
+    idle together - distinct from individual head idle time. Useful for
+    confirming whether a shared event (e.g. a logging gap seen across all
+    heads at once) corresponds to a genuine full-machine shutdown."""
+    from src.closure_detection.detector import detect_machine_idle_periods
+
+    idle_df = detect_machine_idle_periods(readings, idle_status_code=2, sustained_seconds=sustained_seconds)
+    if idle_df.is_empty():
+        return []
+
+    return [
+        {
+            "machine_id": row["machine_id"],
+            "start": str(row["start"]),
+            "end": str(row["end"]),
+            "duration_minutes": round(row["duration_seconds"] / 60, 1),
+        }
+        for row in idle_df.to_dicts()
+    ]

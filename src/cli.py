@@ -32,7 +32,7 @@ from src.closure_detection.detector import (
 )
 from src.agent.orchestrator import run_agent, AgentResult
 from src.reporting.report_builder import save_text_report
-
+from src.agent import tools as agent_tools
 
 app = typer.Typer(help="AROL telemetry agent CLI")
 
@@ -259,6 +259,7 @@ def ask(
 
     t0 = time.time()
     closures = _prepare_closures(config)
+    agent_tools.set_readings_config(config)
     t1 = time.time()
     typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures)} rows)")
 
@@ -293,6 +294,7 @@ def report(
 
     t0 = time.time()
     closures = _prepare_closures(config)
+    agent_tools.set_readings_config(config)
     t1 = time.time()
     typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures)} rows)")
 
@@ -315,6 +317,7 @@ def chat(pool: str = "config/config.yaml"):
 
     t0 = time.time()
     closures_pl = _prepare_closures(config)
+    agent_tools.set_readings_config(config)
     t1 = time.time()
     typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures_pl)} rows)")
 
