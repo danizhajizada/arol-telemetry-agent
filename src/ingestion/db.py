@@ -3,7 +3,7 @@ Persistence layer owned by Person A.
 
 raw_telemetry -> SQLite
 readings      -> ZSTD Parquet
-closures      -> SQLite
+closures      -> ZSTD Parquet
 
 A manifest prevents unnecessary reprocessing when the raw data pool
 has not changed.
@@ -507,42 +507,101 @@ def load_readings(
 def save_closures(
     closures_df: pl.DataFrame,
     config: dict,
+    source_file: str,
     mode: str = "replace",
 ) -> None:
+    """
+    Persist closure/counter-advance records as one ZSTD-compressed
+    Parquet file per source telemetry CSV.
+    """
 
-    _write_table(
-        closures_df,
-        "closures",
-        config,
-        mode,
+    closures_dir = (
+        Path(config["database"]["path"]).parent
+        / "closures"
+    )
+
+    if (
+        mode == "replace"
+        and closures_dir.exists()
+    ):
+        for path in closures_dir.glob(
+            "*.parquet"
+        ):
+            path.unlink()
+
+    closures_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    if closures_df.is_empty():
+        return
+
+    output_path = (
+        closures_dir
+        / f"{Path(source_file).stem}.parquet"
+    )
+
+    closures_df.write_parquet(
+        output_path,
+        compression="zstd",
     )
 
 
 def load_closures(
     config: dict,
 ) -> pl.DataFrame:
+    """
+    Load all persisted closure/counter-advance Parquet files.
+    """
 
-    db_path = Path(
-        config["database"]["path"]
+    closures_dir = (
+        Path(config["database"]["path"]).parent
+        / "closures"
     )
 
-    if not db_path.exists():
+    if not closures_dir.exists():
         return pl.DataFrame()
 
-    conn = get_connection(config)
-
-    exists = _table_exists(
-        conn,
-        "closures",
+    parquet_files = list(
+        closures_dir.glob("*.parquet")
     )
 
-    conn.close()
-
-    if not exists:
+    if not parquet_files:
         return pl.DataFrame()
 
-    with _get_adbc_connection(config) as conn:
-        return pl.read_database(
-            query="SELECT * FROM closures",
-            connection=conn,
+    return (
+        pl.scan_parquet(
+            str(
+                closures_dir
+                / "*.parquet"
+            )
         )
+        .collect()
+    )
+
+def delete_closure_sources(
+    source_files: set[str],
+    config: dict,
+) -> None:
+    """
+    Remove derived closure Parquet files corresponding to
+    source CSV files that no longer exist.
+    """
+
+    if not source_files:
+        return
+
+    closures_dir = (
+        Path(config["database"]["path"]).parent
+        / "closures"
+    )
+
+    for source_file in source_files:
+        output_path = (
+            closures_dir
+            / f"{Path(source_file).stem}.parquet"
+        )
+
+        if output_path.exists():
+            output_path.unlink()

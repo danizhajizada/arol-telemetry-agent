@@ -13,26 +13,17 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import pandas as pd
 import logging
-from pathlib import Path
 
 import polars as pl
 import typer
 import yaml
 
-from src.ingestion.loader import list_data_files, load_raw_file
-from src.ingestion.normalizer import (
-    reshape_wide_to_long,
-    validate,
-    drop_duplicates,
-)
-from src.ingestion import db
-from src.closure_detection.detector import (
-    detect_closures,
-    classify_status,
-)
+
 from src.agent.orchestrator import run_agent, AgentResult
 from src.reporting.report_builder import save_text_report
 from src.agent import tools as agent_tools
+
+from src.ingestion.pipeline import prepare_closures
 
 app = typer.Typer(help="AROL telemetry agent CLI")
 
@@ -61,172 +52,6 @@ def _load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def _prepare_closures(config: dict) -> pl.DataFrame:
-    """
-    Prepare closure data one source file at a time
-    to keep memory usage bounded.
-    """
-
-    if not db.needs_reprocessing(config):
-        cached = db.load_closures(config)
-
-        if not cached.is_empty():
-            logger.info(
-                "Using cached closures table "
-                "(no new/changed raw files)."
-            )
-            return cached
-
-    logger.info(
-        "Raw data pool changed or no cache found - "
-        "running file-by-file pipeline."
-    )
-
-    files = list_data_files(config)
-
-    if not files:
-        typer.echo(
-            "No data found - check config data_pool.folder."
-        )
-        raise typer.Exit(code=1)
-
-    db_path = Path(
-        config["database"]["path"]
-    )
-
-    manifest_path = Path(
-        config["database"]["manifest_path"]
-    )
-
-    full_raw_rebuild = (
-        not db_path.exists()
-        or not manifest_path.exists()
-    )
-
-    changed_files, removed_files = (
-        db.get_file_changes(config)
-    )
-
-    if full_raw_rebuild:
-        changed_files = {
-            path.name
-            for path in files
-        }
-
-    db.delete_raw_sources(
-        removed_files,
-        config,
-    )
-
-    previous_tail = None
-    first_batch = True
-    first_raw_write = True
-
-    for path in files:
-        logger.info(
-            "Processing %s",
-            path.name,
-        )
-
-        raw = load_raw_file(
-            path,
-            config,
-        )
-
-        if path.name in changed_files:
-            db.save_raw_file(
-                raw,
-                config,
-                replace_table=(
-                    full_raw_rebuild
-                    and first_raw_write
-                ),
-            )
-
-            first_raw_write = False
-
-        long_df = reshape_wide_to_long(
-            raw,
-            config,
-        )
-
-        for issue in validate(long_df):
-            logger.warning(
-                "Validation issue in %s: %s",
-                path.name,
-                issue,
-            )
-
-        long_df = drop_duplicates(
-            long_df
-        )
-
-        mode = (
-            "replace"
-            if first_batch
-            else "append"
-        )
-
-        db.save_readings(
-            long_df,
-            config,
-            mode=mode,
-        )
-
-        if previous_tail is not None:
-            detection_df = pl.concat(
-                [
-                    previous_tail,
-                    long_df,
-                ],
-                how="vertical",
-            )
-        else:
-            detection_df = long_df
-
-        closures = detect_closures(
-            detection_df
-        )
-
-        closures = classify_status(
-            closures,
-            config["status_codes"],
-        )
-
-        db.save_closures(
-            closures,
-            config,
-            mode=mode,
-        )
-
-        # Keep only the final reading for each head
-        # so counter changes across file boundaries
-        # are preserved.
-        previous_tail = (
-            long_df
-            .sort(
-                [
-                    "head_id",
-                    "timestamp",
-                ]
-            )
-            .unique(
-                subset=["head_id"],
-                keep="last",
-                maintain_order=True,
-            )
-        )
-
-        first_batch = False
-
-        del raw
-        del long_df
-        del detection_df
-        del closures
-
-    db.update_manifest(config)
-
-    return db.load_closures(config)
 
 
 def _run_agent(
@@ -258,7 +83,7 @@ def ask(
     config = _load_config(pool)
 
     t0 = time.time()
-    closures = _prepare_closures(config)
+    closures = prepare_closures(config)
     agent_tools.set_readings_config(config)
     t1 = time.time()
     typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures)} rows)")
@@ -293,7 +118,7 @@ def report(
     config = _load_config(pool)
 
     t0 = time.time()
-    closures = _prepare_closures(config)
+    closures = prepare_closures(config)
     agent_tools.set_readings_config(config)
     t1 = time.time()
     typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures)} rows)")
@@ -316,7 +141,7 @@ def chat(pool: str = "config/config.yaml"):
     config = _load_config(pool)
 
     t0 = time.time()
-    closures_pl = _prepare_closures(config)
+    closures_pl = prepare_closures(config)
     agent_tools.set_readings_config(config)
     t1 = time.time()
     typer.echo(f"[TIMING] Load closures: {t1 - t0:.2f}s ({len(closures_pl)} rows)")
