@@ -51,6 +51,6 @@ output:
 llm:
   provider: "anthropic"
   model: "claude-sonnet-5"
-  max_tokens: 2048
+  max_tokens: 3500
   max_tool_call_rounds: 5
   ANTHROPIC_API_KEY: "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"
