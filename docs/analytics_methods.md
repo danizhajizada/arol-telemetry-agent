@@ -203,22 +203,6 @@ editing `config.yaml`. This is a gap against the project's own "no
 hard-coded thresholds" principle (`architecture.md`), noted here rather
 than silently left inconsistent with the rest of the documentation.
 
-## Open questions (not resolved unilaterally)
-
-Two related definitional questions affect current numbers but were left
-unchanged pending a team decision, since `team_rules.md` requires
-agreement before changing a shared KPI's meaning:
-
-- **Should "No Load" cycles count as successful in `success_rate*`?**
-  Currently yes (`is_reject == False` includes them), which on the real
-  dataset produces a success rate around 99.998% - not a bug, but a
-  consequence of defining "success" as "not a rejected cycle" when No
-  Load cycles (no cap present at all) inflate the denominator.
-- **Should "No Load" cycles count as "pieces" in
-  `capping_speed_incremental`?** Currently yes - it sums `count_increment`
-  regardless of `status_label`. If "capping speed" is meant to measure
-  actual pieces capped, No Load cycles arguably shouldn't count.
-
 ## Testing
 
 `tests/test_analytics.py` covers every function in this layer
