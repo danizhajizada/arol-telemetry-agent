@@ -115,12 +115,14 @@ from the model.
 Three ways to interact with the system:
 
 - **`ask <question>`** - a single free-text question, one-shot.
+
   ```
   python -m src.cli ask "which head has the most problems and why?"
   ```
 - **`report <kind>`** - a small set of named, pre-defined questions
   (e.g. an overall KPI summary) routed through the same agent loop as
   `ask`.
+
   ```
   python -m src.cli report kpi
   python -m src.cli report anomalies
@@ -131,9 +133,11 @@ Three ways to interact with the system:
   for every question - meaningful given the dataset's size, where
   reloading on every question would make an interactive session
   impractically slow.
+
   ```
   python -m src.cli chat
   ```
+
   Once started, the session prompts for a question, prints the answer,
   then prompts again - type `exit` or `quit` to end the session.
   ```

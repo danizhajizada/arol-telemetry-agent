@@ -20,17 +20,17 @@ config/config.yaml       All paths, thresholds, status codes, and the LLM
 data/                     Place raw data pool CSV files here.
 data/.cache/              SQLite DB + ingestion manifest + normalised Parquet readings (auto-created).
 
-src/ingestion/            Person A
+src/ingestion/         
   loader.py               Loads raw wide-format CSV data pool files.
   normalizer.py           Reshapes wide -> long, validates.
   db.py                   SQLite persistence (raw_telemetry,
                            closures) + ZSTD Parquet persistence (readings) + manifest-based freshness check.
 
-src/closure_detection/    Person A
+src/closure_detection/  
   detector.py              Closure/counter-advance detection, status
                            classification, per-head and machine-wide idle-period detection.
 
-src/analytics/            Person B
+src/analytics/          
   kpi.py                   success_rate, success_rate_per_head,
                            torque_stats, capping_speed_incremental
   trend.py                 moving_average, detect_drift
@@ -43,7 +43,7 @@ src/analytics/            Person B
                             saves it as a PNG under output/plots/, and
                             returns the file path (never the image itself).
 
-src/agent/                 Person C
+src/agent/                
   tools.py                  Tool schemas (sent to the LLM) + the mapping
                             back to Person B's real functions.
   orchestrator.py            The tool-calling loop against the Anthropic API.
@@ -66,47 +66,16 @@ output/                      Auto-created, gitignored. plots/ holds PNGs
 
 HOW TO RUN
 ----------
-1. create and activate a virtual environment:
+See INSTALLATION.md for setup and run instructions.
 
-   Windows PowerShell:
-     python -m venv venv
-     .\venv\Scripts\Activate.ps1
+`ask` and `chat` let the agent decide on its own whether a question needs
+a plot: any question phrased as "plot/chart/show/visualize ..." makes it
+call one of the plot_* tools, which saves a PNG under output/plots/ and
+reports the file path back in its answer.
 
-   Linux/macOS:
-     python3 -m venv venv && source venv/bin/activate
-
-2. pip install -r requirements.txt
-
-3. set the Anthropic API key:
-
-   Windows PowerShell:
-     $env:ANTHROPIC_API_KEY="sk-ant-..."
-
-   Linux/macOS:
-     export ANTHROPIC_API_KEY="sk-ant-..."
-
-4. Edit config/config.yaml if your data pool folder differs from data/.
-
-5. Place raw telemetry_*.csv files in data/.
-
-6. Run:
-     python -m src.cli ask "What is the average closing torque for successful closures?"
-     python -m src.cli ask "Plot a torque histogram for successful closures"
-     python -m src.cli report kpi
-     python -m src.cli report anomalies
-     python -m src.cli report drift
-     python -m src.cli chat
-
-   `ask` and `chat` let the agent decide on its own whether a question needs
-   a plot: any question phrased as "plot/chart/show/visualize ..." makes it
-   call one of the plot_* tools, which saves a PNG under output/plots/ and
-   reports the file path back in its answer.
-
-   `report <kind>` always saves its full answer (plus links to any charts
-   generated during that run) to a timestamped Markdown file under
-   output/reports/ - that's the "sample generated report" artifact.
-
-7. Tests: pytest --confcutdir=. tests/ -q
+`report <kind>` always saves its full answer (plus links to any charts
+generated during that run) to a timestamped Markdown file under
+output/reports/ - that's the "sample generated report" artifact.
 
 DATASET FORMAT
 ---------------
